@@ -3,8 +3,8 @@ module github.com/SpareCores/sc-keeper-go
 go 1.26.6
 
 require (
-	k8s.io/apiextensions-apiserver v0.37.0
-	k8s.io/apimachinery v0.37.0
+	k8s.io/apiextensions-apiserver v0.36.0
+	k8s.io/apimachinery v0.36.1
 	sigs.k8s.io/yaml v1.6.0
 )
 
