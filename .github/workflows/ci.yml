@@ -1,0 +1,38 @@
+name: CI
+
+# Runs the gates inside the dev container, the same way a developer does with
+# hack/dev.sh.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/dev-image
+
+      - name: Generated code and go.mod are up to date
+        run: |
+          hack/dev.sh bash -c 'make generate && go mod tidy'
+          git add -N .
+          git diff --exit-code
+
+      - name: Lint
+        run: hack/dev.sh make lint
+
+      - name: Test (offline)
+        run: hack/dev.sh make test

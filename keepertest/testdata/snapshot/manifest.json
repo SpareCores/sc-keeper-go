@@ -1,0 +1,891 @@
+{
+  "fetched_at": "2026-10-12T15:35:27+00:00",
+  "keeper": {
+    "database_hash": "dd8b95c247cffcbe33e74cdf853ce926c47e151b",
+    "database_last_updated": "2026-10-12T15:16:38+00:00",
+    "packages": {
+      "sparecores-crawler": "0.10.0",
+      "sparecores-data": "0.5.1",
+      "sparecores-keeper": "0.3.6"
+    }
+  },
+  "keeper_url": "https://keeper.sparecores.net",
+  "queries": [
+    {
+      "file": "tables/region.json.gz",
+      "name": "tables/region",
+      "params": {},
+      "path": "/table/region",
+      "rows": 263,
+      "sha256": "b2f2136dc7b287d1c38633ca3337c5a5a233b444c88d5b40fdc36c6bfc01ba09"
+    },
+    {
+      "file": "tables/zone.json.gz",
+      "name": "tables/zone",
+      "params": {},
+      "path": "/table/zone",
+      "rows": 589,
+      "sha256": "6dcabcbf3d72b4157c50c1b12743f0e59be470ce8bdc2495981cf46679a666ca"
+    },
+    {
+      "file": "benchmark_configs.json.gz",
+      "name": "benchmark_configs",
+      "params": {},
+      "path": "/benchmark_configs",
+      "rows": 866,
+      "sha256": "b12877438fbc39bfe996fa7474111470463c882d0490fb01ffa96d5bd3cee0bb"
+    },
+    {
+      "fields": [
+        "vendor_id",
+        "region_id",
+        "zone_id",
+        "server_id",
+        "operating_system",
+        "allocation",
+        "unit",
+        "price",
+        "currency",
+        "status",
+        "observed_at"
+      ],
+      "file": "aws/server-prices-ondemand.json.gz",
+      "name": "aws/server-prices-ondemand",
+      "params": {
+        "allocation": "ondemand",
+        "limit": -1,
+        "vcpus_min": 128,
+        "vendor": "aws",
+        "vendor_regions": [
+          "aws~us-east-1",
+          "aws~us-west-2"
+        ]
+      },
+      "path": "/server_prices",
+      "projection": "flat",
+      "rows": 1864,
+      "sha256": "5a1d1b8e559977a14c03f52375247a8aa15f2d33292392bda70824ba1051573f"
+    },
+    {
+      "fields": [
+        "vendor_id",
+        "region_id",
+        "zone_id",
+        "server_id",
+        "operating_system",
+        "allocation",
+        "unit",
+        "price",
+        "currency",
+        "status",
+        "observed_at"
+      ],
+      "file": "aws/server-prices-spot.json.gz",
+      "name": "aws/server-prices-spot",
+      "params": {
+        "allocation": "spot",
+        "limit": -1,
+        "vcpus_min": 128,
+        "vendor": "aws",
+        "vendor_regions": [
+          "aws~us-east-1",
+          "aws~us-west-2"
+        ]
+      },
+      "path": "/server_prices",
+      "projection": "flat",
+      "rows": 1671,
+      "sha256": "00567e3262d53e37faec89d13196842416f9af3294bc4abcc366a4831c054671"
+    },
+    {
+      "file": "aws/servers-ondemand.json.gz",
+      "name": "aws/servers-ondemand",
+      "params": {
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "aws",
+        "vendor_regions": "aws~us-east-1"
+      },
+      "path": "/servers",
+      "rows": 1366,
+      "sha256": "9b3482c6476e4d0dc0ecd8e1b9393e8dd58fdc536472036e2c5ce2f5499f5879"
+    },
+    {
+      "file": "aws/servers-spot.json.gz",
+      "name": "aws/servers-spot",
+      "params": {
+        "best_price_allocation": "SPOT_ONLY",
+        "limit": -1,
+        "vendor": "aws",
+        "vendor_regions": "aws~us-east-1"
+      },
+      "path": "/servers",
+      "rows": 1358,
+      "sha256": "a2e4f4733d796bdc119d3cd128200226d53580372f7f673e473eabdf3fdedb24"
+    },
+    {
+      "file": "aws/benchmark-geekbench_score.json.gz",
+      "name": "aws/benchmark-geekbench_score",
+      "params": {
+        "benchmark_config": "{\"cores\": \"single\"}",
+        "benchmark_id": "geekbench:score",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "aws",
+        "vendor_regions": "aws~us-east-1"
+      },
+      "path": "/servers",
+      "rows": 1366,
+      "sha256": "fb38355687aeef82649bafd6fd39aa7b4e56595e2ab0e96777237813a6a45304"
+    },
+    {
+      "file": "aws/benchmark-passmark_cpu_single_threaded_test.json.gz",
+      "name": "aws/benchmark-passmark_cpu_single_threaded_test",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "passmark:cpu_single_threaded_test",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "aws",
+        "vendor_regions": "aws~us-east-1"
+      },
+      "path": "/servers",
+      "rows": 1366,
+      "sha256": "5a47e8727fa67077856563b241b8ef4bce76d3265e4677826c0ddc16d794e60d"
+    },
+    {
+      "file": "aws/benchmark-stress_ng_bestn.json.gz",
+      "name": "aws/benchmark-stress_ng_bestn",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "stress_ng:bestn",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "aws",
+        "vendor_regions": "aws~us-east-1"
+      },
+      "path": "/servers",
+      "rows": 1366,
+      "sha256": "577dc276e046aa34e6e31a73110a05f434a00e7371ecaa1dc94d4a8b6357070e"
+    },
+    {
+      "file": "aws/benchmark-workload_profile_web.json.gz",
+      "name": "aws/benchmark-workload_profile_web",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "workload_profile:web",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "aws",
+        "vendor_regions": "aws~us-east-1"
+      },
+      "path": "/servers",
+      "rows": 1366,
+      "sha256": "72c8d3185ab3d627fb5fa1d9336e59040797c7b6f366cab275b98df2bb6cb203"
+    },
+    {
+      "file": "aws/benchmark-membench_latency.json.gz",
+      "name": "aws/benchmark-membench_latency",
+      "params": {
+        "benchmark_config": "{\"scope\": \"RAM\"}",
+        "benchmark_id": "membench:latency",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "aws",
+        "vendor_regions": "aws~us-east-1"
+      },
+      "path": "/servers",
+      "rows": 1366,
+      "sha256": "f79ad03edfd642ace6b1356e5feac3dcf0e97f9c64f73e610aab7706e83daf7e"
+    },
+    {
+      "file": "azure/servers-ondemand.json.gz",
+      "name": "azure/servers-ondemand",
+      "params": {
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "azure",
+        "vendor_regions": "azure~westeurope"
+      },
+      "path": "/servers",
+      "rows": 1407,
+      "sha256": "9dbe3a0138fe068c4bc3e43bdfa201bdda263d45b94bcffa7c6be048f6a2d940"
+    },
+    {
+      "file": "azure/servers-spot.json.gz",
+      "name": "azure/servers-spot",
+      "params": {
+        "best_price_allocation": "SPOT_ONLY",
+        "limit": -1,
+        "vendor": "azure",
+        "vendor_regions": "azure~westeurope"
+      },
+      "path": "/servers",
+      "rows": 1397,
+      "sha256": "f1b7b58c98c2c51689e62df48a80ff5fae3a3b4e10b4b00d93bf9666bc712429"
+    },
+    {
+      "file": "azure/benchmark-geekbench_score.json.gz",
+      "name": "azure/benchmark-geekbench_score",
+      "params": {
+        "benchmark_config": "{\"cores\": \"single\"}",
+        "benchmark_id": "geekbench:score",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "azure",
+        "vendor_regions": "azure~westeurope"
+      },
+      "path": "/servers",
+      "rows": 1407,
+      "sha256": "399be30c293680f66650843c55663a7c41b0e15e0c630f2208b5a917e4fa0e53"
+    },
+    {
+      "file": "azure/benchmark-passmark_cpu_single_threaded_test.json.gz",
+      "name": "azure/benchmark-passmark_cpu_single_threaded_test",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "passmark:cpu_single_threaded_test",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "azure",
+        "vendor_regions": "azure~westeurope"
+      },
+      "path": "/servers",
+      "rows": 1407,
+      "sha256": "aede16ddfdca96e80b1b2df4055014ba535edfdeee5478fccbc2a216859e51b6"
+    },
+    {
+      "file": "azure/benchmark-stress_ng_bestn.json.gz",
+      "name": "azure/benchmark-stress_ng_bestn",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "stress_ng:bestn",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "azure",
+        "vendor_regions": "azure~westeurope"
+      },
+      "path": "/servers",
+      "rows": 1407,
+      "sha256": "0c62f965a8cbb72d9946ea6a6f530c0c4b0aa1d44d80fe527eeee930f765e6f2"
+    },
+    {
+      "file": "azure/benchmark-workload_profile_web.json.gz",
+      "name": "azure/benchmark-workload_profile_web",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "workload_profile:web",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "azure",
+        "vendor_regions": "azure~westeurope"
+      },
+      "path": "/servers",
+      "rows": 1407,
+      "sha256": "5264ffda68b54bf2e1bd69d987139641fb3c0ad40807efc2397776a75cf8248e"
+    },
+    {
+      "file": "azure/benchmark-membench_latency.json.gz",
+      "name": "azure/benchmark-membench_latency",
+      "params": {
+        "benchmark_config": "{\"scope\": \"RAM\"}",
+        "benchmark_id": "membench:latency",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "azure",
+        "vendor_regions": "azure~westeurope"
+      },
+      "path": "/servers",
+      "rows": 1407,
+      "sha256": "93781f01263f625842a99cc9da2a57bb6d08936c811babceb3687a4d6d359399"
+    },
+    {
+      "file": "gcp/servers-ondemand.json.gz",
+      "name": "gcp/servers-ondemand",
+      "params": {
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "gcp",
+        "vendor_regions": "gcp~1000"
+      },
+      "path": "/servers",
+      "rows": 578,
+      "sha256": "b03fd47339d8a3966f3eb06adf5e4592edb89d45aeed381c51b91acbb2b8b5c6"
+    },
+    {
+      "file": "gcp/servers-spot.json.gz",
+      "name": "gcp/servers-spot",
+      "params": {
+        "best_price_allocation": "SPOT_ONLY",
+        "limit": -1,
+        "vendor": "gcp",
+        "vendor_regions": "gcp~1000"
+      },
+      "path": "/servers",
+      "rows": 575,
+      "sha256": "6b59cb819452291cc646ea5429793746e3d5e186561f7f62552682a48723bfd7"
+    },
+    {
+      "file": "gcp/benchmark-geekbench_score.json.gz",
+      "name": "gcp/benchmark-geekbench_score",
+      "params": {
+        "benchmark_config": "{\"cores\": \"single\"}",
+        "benchmark_id": "geekbench:score",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "gcp",
+        "vendor_regions": "gcp~1000"
+      },
+      "path": "/servers",
+      "rows": 578,
+      "sha256": "e9843a3be6a99482e0415f86404b4fcf162bf25f96fc1feee221b5bd6a23b14a"
+    },
+    {
+      "file": "gcp/benchmark-passmark_cpu_single_threaded_test.json.gz",
+      "name": "gcp/benchmark-passmark_cpu_single_threaded_test",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "passmark:cpu_single_threaded_test",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "gcp",
+        "vendor_regions": "gcp~1000"
+      },
+      "path": "/servers",
+      "rows": 578,
+      "sha256": "faf2d24bca7ee5042af4bb5af5559bcdf38472c8c362ff4c021bf16214864ff1"
+    },
+    {
+      "file": "gcp/benchmark-stress_ng_bestn.json.gz",
+      "name": "gcp/benchmark-stress_ng_bestn",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "stress_ng:bestn",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "gcp",
+        "vendor_regions": "gcp~1000"
+      },
+      "path": "/servers",
+      "rows": 578,
+      "sha256": "058f021d6997b5fe029d7893c6c92bee3f40f87e3657181b6b6ef6974e9108ef"
+    },
+    {
+      "file": "gcp/benchmark-workload_profile_web.json.gz",
+      "name": "gcp/benchmark-workload_profile_web",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "workload_profile:web",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "gcp",
+        "vendor_regions": "gcp~1000"
+      },
+      "path": "/servers",
+      "rows": 578,
+      "sha256": "c9f02c10507bb1767357a7512f631a01c47e4eaf32bb5635919af6b325e624ae"
+    },
+    {
+      "file": "gcp/benchmark-membench_latency.json.gz",
+      "name": "gcp/benchmark-membench_latency",
+      "params": {
+        "benchmark_config": "{\"scope\": \"RAM\"}",
+        "benchmark_id": "membench:latency",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "gcp",
+        "vendor_regions": "gcp~1000"
+      },
+      "path": "/servers",
+      "rows": 578,
+      "sha256": "bbb87eadbb909bb65d68766ae662677fce8582406f359ede93aaf086024f02bd"
+    },
+    {
+      "file": "alicloud/servers-ondemand.json.gz",
+      "name": "alicloud/servers-ondemand",
+      "params": {
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "alicloud",
+        "vendor_regions": "alicloud~eu-central-1"
+      },
+      "path": "/servers",
+      "rows": 164,
+      "sha256": "b86f7556822284369af01554b681113b161ff2264410012e7a2be4b66f570215"
+    },
+    {
+      "file": "alicloud/servers-spot.json.gz",
+      "name": "alicloud/servers-spot",
+      "params": {
+        "best_price_allocation": "SPOT_ONLY",
+        "limit": -1,
+        "vendor": "alicloud",
+        "vendor_regions": "alicloud~eu-central-1"
+      },
+      "path": "/servers",
+      "rows": 93,
+      "sha256": "38c61a046242252f3b96b1056d21333ef881960c89bc504449638ef0a7da960f"
+    },
+    {
+      "file": "alicloud/benchmark-geekbench_score.json.gz",
+      "name": "alicloud/benchmark-geekbench_score",
+      "params": {
+        "benchmark_config": "{\"cores\": \"single\"}",
+        "benchmark_id": "geekbench:score",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "alicloud",
+        "vendor_regions": "alicloud~eu-central-1"
+      },
+      "path": "/servers",
+      "rows": 164,
+      "sha256": "3fb4489216bf729d82ad484fb926029657a00c98beefac8fc7c76764378972dc"
+    },
+    {
+      "file": "alicloud/benchmark-passmark_cpu_single_threaded_test.json.gz",
+      "name": "alicloud/benchmark-passmark_cpu_single_threaded_test",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "passmark:cpu_single_threaded_test",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "alicloud",
+        "vendor_regions": "alicloud~eu-central-1"
+      },
+      "path": "/servers",
+      "rows": 164,
+      "sha256": "2d9227e1a3a5b2a0588b6c5e017a03483a574dafd12a6fe3774db1a225d02838"
+    },
+    {
+      "file": "alicloud/benchmark-stress_ng_bestn.json.gz",
+      "name": "alicloud/benchmark-stress_ng_bestn",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "stress_ng:bestn",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "alicloud",
+        "vendor_regions": "alicloud~eu-central-1"
+      },
+      "path": "/servers",
+      "rows": 164,
+      "sha256": "77dda174084ad3fa8a1755148a4d3c945e1541407def305de4fec651c2e66fe8"
+    },
+    {
+      "file": "alicloud/benchmark-workload_profile_web.json.gz",
+      "name": "alicloud/benchmark-workload_profile_web",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "workload_profile:web",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "alicloud",
+        "vendor_regions": "alicloud~eu-central-1"
+      },
+      "path": "/servers",
+      "rows": 164,
+      "sha256": "da32661ccafef4b22bb12cee2784acc9a6d2070458582c63a7d855f98a97d0b6"
+    },
+    {
+      "file": "alicloud/benchmark-membench_latency.json.gz",
+      "name": "alicloud/benchmark-membench_latency",
+      "params": {
+        "benchmark_config": "{\"scope\": \"RAM\"}",
+        "benchmark_id": "membench:latency",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "alicloud",
+        "vendor_regions": "alicloud~eu-central-1"
+      },
+      "path": "/servers",
+      "rows": 164,
+      "sha256": "b282b1a54c7f6057f90209d3a0ac741faa278cdba92715201ee42bc1c75e9da2"
+    },
+    {
+      "file": "hcloud/servers-ondemand.json.gz",
+      "name": "hcloud/servers-ondemand",
+      "params": {
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "hcloud",
+        "vendor_regions": "hcloud~4"
+      },
+      "path": "/servers",
+      "rows": 16,
+      "sha256": "d22a4cf71d8fb1e936888d77016ed3ffbc47a8ef71860fc6272c4e1572d2a72a"
+    },
+    {
+      "file": "hcloud/benchmark-geekbench_score.json.gz",
+      "name": "hcloud/benchmark-geekbench_score",
+      "params": {
+        "benchmark_config": "{\"cores\": \"single\"}",
+        "benchmark_id": "geekbench:score",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "hcloud",
+        "vendor_regions": "hcloud~4"
+      },
+      "path": "/servers",
+      "rows": 16,
+      "sha256": "43fd4c12bbd4fc6b91ddcf9c6364460d9c7f71964717bfa997563cfcb41a678a"
+    },
+    {
+      "file": "hcloud/benchmark-passmark_cpu_single_threaded_test.json.gz",
+      "name": "hcloud/benchmark-passmark_cpu_single_threaded_test",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "passmark:cpu_single_threaded_test",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "hcloud",
+        "vendor_regions": "hcloud~4"
+      },
+      "path": "/servers",
+      "rows": 16,
+      "sha256": "efedde458d5719a2f5e6d9b01201728252ad50c2b7751f1f331051f18860e31c"
+    },
+    {
+      "file": "hcloud/benchmark-stress_ng_bestn.json.gz",
+      "name": "hcloud/benchmark-stress_ng_bestn",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "stress_ng:bestn",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "hcloud",
+        "vendor_regions": "hcloud~4"
+      },
+      "path": "/servers",
+      "rows": 16,
+      "sha256": "3e52c1a1ad8287b3508762350af69dd685629fc158aa24a1c892e41c8ebf0f10"
+    },
+    {
+      "file": "hcloud/benchmark-workload_profile_web.json.gz",
+      "name": "hcloud/benchmark-workload_profile_web",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "workload_profile:web",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "hcloud",
+        "vendor_regions": "hcloud~4"
+      },
+      "path": "/servers",
+      "rows": 16,
+      "sha256": "1b3a6c440b4c84dc88d5bc2d372b37be34d5b9b3ebbd48959a86be939ce03dc4"
+    },
+    {
+      "file": "hcloud/benchmark-membench_latency.json.gz",
+      "name": "hcloud/benchmark-membench_latency",
+      "params": {
+        "benchmark_config": "{\"scope\": \"RAM\"}",
+        "benchmark_id": "membench:latency",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "hcloud",
+        "vendor_regions": "hcloud~4"
+      },
+      "path": "/servers",
+      "rows": 16,
+      "sha256": "e78876e6d37a3e5309e7e05ebc98e2a30e68212401531c720432ab538e568df3"
+    },
+    {
+      "file": "ovh/servers-ondemand.json.gz",
+      "name": "ovh/servers-ondemand",
+      "params": {
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "ovh",
+        "vendor_regions": "ovh~GRA11"
+      },
+      "path": "/servers",
+      "rows": 62,
+      "sha256": "cfadfae84d8456d8ca9d016fe2a800b14fd180c6b134f458944f6348550fe95b"
+    },
+    {
+      "file": "ovh/benchmark-geekbench_score.json.gz",
+      "name": "ovh/benchmark-geekbench_score",
+      "params": {
+        "benchmark_config": "{\"cores\": \"single\"}",
+        "benchmark_id": "geekbench:score",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "ovh",
+        "vendor_regions": "ovh~GRA11"
+      },
+      "path": "/servers",
+      "rows": 62,
+      "sha256": "73ded25547ce78efb54376cb07795fd665d6d92d4915e25a7217bd1fdf9912c8"
+    },
+    {
+      "file": "ovh/benchmark-passmark_cpu_single_threaded_test.json.gz",
+      "name": "ovh/benchmark-passmark_cpu_single_threaded_test",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "passmark:cpu_single_threaded_test",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "ovh",
+        "vendor_regions": "ovh~GRA11"
+      },
+      "path": "/servers",
+      "rows": 62,
+      "sha256": "b7096c42f9844e6d1b3bb6b59c0c60b1843f52f8c42c492f95e56ebf474771f0"
+    },
+    {
+      "file": "ovh/benchmark-stress_ng_bestn.json.gz",
+      "name": "ovh/benchmark-stress_ng_bestn",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "stress_ng:bestn",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "ovh",
+        "vendor_regions": "ovh~GRA11"
+      },
+      "path": "/servers",
+      "rows": 62,
+      "sha256": "1e68250c8c45155b8ba6eef5d8428047f4b3fe7b595e0ce57dcf3b9a1491e2a7"
+    },
+    {
+      "file": "ovh/benchmark-workload_profile_web.json.gz",
+      "name": "ovh/benchmark-workload_profile_web",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "workload_profile:web",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "ovh",
+        "vendor_regions": "ovh~GRA11"
+      },
+      "path": "/servers",
+      "rows": 62,
+      "sha256": "ba719f93d0c32964a5cda647af0a6e382ca5b9692e64f621248ac73858dfd2df"
+    },
+    {
+      "file": "ovh/benchmark-membench_latency.json.gz",
+      "name": "ovh/benchmark-membench_latency",
+      "params": {
+        "benchmark_config": "{\"scope\": \"RAM\"}",
+        "benchmark_id": "membench:latency",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "ovh",
+        "vendor_regions": "ovh~GRA11"
+      },
+      "path": "/servers",
+      "rows": 62,
+      "sha256": "f254cbb42737181ca7b71e7d72ef3eb57b625586689631cc8f1edda8ad1cdeaa"
+    },
+    {
+      "file": "upcloud/servers-ondemand.json.gz",
+      "name": "upcloud/servers-ondemand",
+      "params": {
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "upcloud",
+        "vendor_regions": "upcloud~de-fra1"
+      },
+      "path": "/servers",
+      "rows": 75,
+      "sha256": "ddbdfdfcefd3c6cc8729010b1a53b3e5db854634a0557d0688a243a2a2aa80e6"
+    },
+    {
+      "file": "upcloud/benchmark-geekbench_score.json.gz",
+      "name": "upcloud/benchmark-geekbench_score",
+      "params": {
+        "benchmark_config": "{\"cores\": \"single\"}",
+        "benchmark_id": "geekbench:score",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "upcloud",
+        "vendor_regions": "upcloud~de-fra1"
+      },
+      "path": "/servers",
+      "rows": 75,
+      "sha256": "27e417c3b58d07299f6ab5dff58e5a14fffcd14f9ad39c7f1133afddd1893b3a"
+    },
+    {
+      "file": "upcloud/benchmark-passmark_cpu_single_threaded_test.json.gz",
+      "name": "upcloud/benchmark-passmark_cpu_single_threaded_test",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "passmark:cpu_single_threaded_test",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "upcloud",
+        "vendor_regions": "upcloud~de-fra1"
+      },
+      "path": "/servers",
+      "rows": 75,
+      "sha256": "c4d0ae400185256a8b7b8b2f981dd1298f6295c39f934b5f57b9ecea90cedf83"
+    },
+    {
+      "file": "upcloud/benchmark-stress_ng_bestn.json.gz",
+      "name": "upcloud/benchmark-stress_ng_bestn",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "stress_ng:bestn",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "upcloud",
+        "vendor_regions": "upcloud~de-fra1"
+      },
+      "path": "/servers",
+      "rows": 75,
+      "sha256": "41889ff3b9843b445c852a78ddf7a82e0e537b3ed4379d0b3ea21d5f28766067"
+    },
+    {
+      "file": "upcloud/benchmark-workload_profile_web.json.gz",
+      "name": "upcloud/benchmark-workload_profile_web",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "workload_profile:web",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "upcloud",
+        "vendor_regions": "upcloud~de-fra1"
+      },
+      "path": "/servers",
+      "rows": 75,
+      "sha256": "a13b27f1fc6167f5aa1fa3b2ed723059a82e9405bf21697f3927f2d69d4bf0de"
+    },
+    {
+      "file": "upcloud/benchmark-membench_latency.json.gz",
+      "name": "upcloud/benchmark-membench_latency",
+      "params": {
+        "benchmark_config": "{\"scope\": \"RAM\"}",
+        "benchmark_id": "membench:latency",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "upcloud",
+        "vendor_regions": "upcloud~de-fra1"
+      },
+      "path": "/servers",
+      "rows": 75,
+      "sha256": "0195fea7c1c4377d183332cb672d2a261a2662eac5e552ae24c34a74dc65c0a4"
+    },
+    {
+      "file": "vultr/servers-ondemand.json.gz",
+      "name": "vultr/servers-ondemand",
+      "params": {
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "vultr",
+        "vendor_regions": "vultr~ewr"
+      },
+      "path": "/servers",
+      "rows": 119,
+      "sha256": "5858e39edaa6e01eaefb771f2fef098d6c54515017fdb2a226de8f4a29ec2bc6"
+    },
+    {
+      "file": "vultr/benchmark-geekbench_score.json.gz",
+      "name": "vultr/benchmark-geekbench_score",
+      "params": {
+        "benchmark_config": "{\"cores\": \"single\"}",
+        "benchmark_id": "geekbench:score",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "vultr",
+        "vendor_regions": "vultr~ewr"
+      },
+      "path": "/servers",
+      "rows": 119,
+      "sha256": "0f38d9d3eef685a8a441471071b266ffaf29c46f30c3faa24a926267ff721864"
+    },
+    {
+      "file": "vultr/benchmark-passmark_cpu_single_threaded_test.json.gz",
+      "name": "vultr/benchmark-passmark_cpu_single_threaded_test",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "passmark:cpu_single_threaded_test",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "vultr",
+        "vendor_regions": "vultr~ewr"
+      },
+      "path": "/servers",
+      "rows": 119,
+      "sha256": "f39dc4c2e46c50524d013f83c1e0a6e62700341ea4f977f89ad85974b0c6a751"
+    },
+    {
+      "file": "vultr/benchmark-stress_ng_bestn.json.gz",
+      "name": "vultr/benchmark-stress_ng_bestn",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "stress_ng:bestn",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "vultr",
+        "vendor_regions": "vultr~ewr"
+      },
+      "path": "/servers",
+      "rows": 119,
+      "sha256": "bd7d581a26f44cbe0fb8a1dd9bb1dc870be1283b799befd5ad67828766e78ecd"
+    },
+    {
+      "file": "vultr/benchmark-workload_profile_web.json.gz",
+      "name": "vultr/benchmark-workload_profile_web",
+      "params": {
+        "benchmark_config": "{}",
+        "benchmark_id": "workload_profile:web",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "vultr",
+        "vendor_regions": "vultr~ewr"
+      },
+      "path": "/servers",
+      "rows": 119,
+      "sha256": "27c8bc2d89adc07ee931f8716c8b02ff3df63d66482e2912a51cc7dbec9d802f"
+    },
+    {
+      "file": "vultr/benchmark-membench_latency.json.gz",
+      "name": "vultr/benchmark-membench_latency",
+      "params": {
+        "benchmark_config": "{\"scope\": \"RAM\"}",
+        "benchmark_id": "membench:latency",
+        "best_price_allocation": "ONDEMAND_ONLY",
+        "limit": -1,
+        "vendor": "vultr",
+        "vendor_regions": "vultr~ewr"
+      },
+      "path": "/servers",
+      "rows": 119,
+      "sha256": "f665c61ac7e79d78be3ade3e5ba3a7a0c6ba3f491b80ce607cfdd764d54963f7"
+    }
+  ],
+  "vendors": {
+    "alicloud": {
+      "region": "eu-central-1",
+      "spot": true
+    },
+    "aws": {
+      "region": "us-east-1",
+      "spot": true
+    },
+    "azure": {
+      "region": "westeurope",
+      "spot": true
+    },
+    "gcp": {
+      "region": "us-central1",
+      "spot": true
+    },
+    "hcloud": {
+      "region": "fsn1",
+      "spot": false
+    },
+    "ovh": {
+      "region": "GRA11",
+      "spot": false
+    },
+    "upcloud": {
+      "region": "de-fra1",
+      "spot": false
+    },
+    "vultr": {
+      "region": "ewr",
+      "spot": false
+    }
+  }
+}

@@ -1,0 +1,17 @@
+# Build output
+bin/
+dist/
+cover.out
+*.test
+
+# Go workspace file
+go.work
+
+# Editors
+.idea
+.vscode
+*.swp
+*~
+
+# Interrupted snapshot fetch (cmd/sc-snapshot writes next to the output)
+*.tmp/

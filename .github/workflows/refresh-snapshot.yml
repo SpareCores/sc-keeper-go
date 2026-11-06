@@ -1,0 +1,41 @@
+name: Refresh test snapshot
+
+# Fetches the responses listed in keepertest/testdata/queries.yaml from the
+# public Keeper API and commits them to keepertest/testdata/snapshot. Every
+# test reads the committed snapshot, so test data only changes when this runs.
+# Run it manually; review the diff of the commit (tests that pin data may need
+# new expectations).
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: refresh-snapshot
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Fetch snapshot
+        run: make snapshot
+      - name: Commit if changed
+        run: |
+          git add -A keepertest/testdata/snapshot
+          # the manifest always changes (fetched_at); only data changes count
+          if git diff --cached --quiet -- . ':(exclude)keepertest/testdata/snapshot/manifest.json'; then
+            echo "Snapshot data unchanged, nothing to commit"
+            exit 0
+          fi
+          db_hash=$(jq -r '.keeper.database_hash[:12] + " " + .keeper.database_last_updated' keepertest/testdata/snapshot/manifest.json)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Refresh the test snapshot (Keeper database ${db_hash})"
+          git push

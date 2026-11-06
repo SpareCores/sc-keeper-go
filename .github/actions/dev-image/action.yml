@@ -1,0 +1,25 @@
+name: Build the dev image
+description: >-
+  Builds hack/devcontainer/Dockerfile under exactly the tag hack/dev.sh looks
+  for (a hash of the Dockerfile), with a GitHub Actions layer cache, so the
+  script finds the image and does not rebuild it.
+
+runs:
+  using: composite
+  steps:
+    - uses: docker/setup-buildx-action@v4
+
+    - name: Compute dev image tag
+      id: tag
+      shell: bash
+      run: echo "tag=sc-keeper-go-dev:$(sha256sum hack/devcontainer/Dockerfile | cut -c1-12)" >> "$GITHUB_OUTPUT"
+
+    - name: Build dev image
+      uses: docker/build-push-action@v7
+      with:
+        context: hack/devcontainer
+        file: hack/devcontainer/Dockerfile
+        tags: ${{ steps.tag.outputs.tag }}
+        load: true
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
