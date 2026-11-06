@@ -111,11 +111,36 @@ documented on `snapshot.QueryList`, an example is
 go run github.com/SpareCores/sc-keeper-go/cmd/sc-snapshot -queries queries.yaml -out testdata/snapshot
 ```
 
-The output directory is replaced as a whole. The run fails if the Keeper
-database changes during the fetch, and identical data gives identical files
-(sorted rows and keys, no timestamps in the gzip header). `KEEPER_URL` and
-`KEEPER_API_KEY` come from the environment. This repository refreshes its own
-snapshot with the "Refresh test snapshot" workflow (`make snapshot`).
+The query list is expanded and validated before the first data request: a
+region that does not exist, one that only matches retired (inactive) regions, an
+ambiguous one, an unknown benchmark config or two queries writing one file fail
+the run at once. Region names (`region_id`, `api_reference` or alias) resolve to
+active regions first, so hcloud `fsn1` is the active `fsn1`, not the retired
+`4` that carries it as an alias. Benchmark ids listed more than once (Geekbench
+single- and multi-core) get a short hash of the canonical config in
+`{benchmark_slug}` (`geekbench_score-1a2b3c4d`); an id listed once keeps its
+plain slug.
+
+Each response is read as a stream and written to its file as soon as it is
+complete (a response is canonicalised and sorted first, so its rows are held in
+encoded form, one response at a time, never the whole snapshot). The output
+directory is replaced as a whole when the run succeeds; until then the files
+are in `<out>.tmp`, and files not part of the query list (leftovers of killed
+runs) are pruned before the swap. The swap renames `<out>` to `<out>.old`, the
+staging directory to `<out>`, then deletes the old one; a crash in between is
+repaired by the next run. A lock (`<out>.lock`) makes a second run on the same
+output fail at once (the lock file stays next to the output; add `*.lock` and
+`*.tmp` to your `.gitignore`); SIGINT and SIGTERM cancel the run and remove the file
+being written. After an
+interruption, `-resume` skips the queries whose file exists (in `<out>` or
+`<out>.tmp`), is complete (its SHA-256 matches the manifest) and was fetched
+from the same Keeper database hash; everything else is fetched again. The run
+fails if the Keeper database changes during the fetch, and identical data gives
+identical files and manifest (sorted rows and keys, no timestamps in the gzip
+header; only `fetched_at` differs). `KEEPER_URL` and `KEEPER_API_KEY` come from
+the environment. Library users call `snapshot.Fetch` with `Options{Dir: ...,
+Resume: ...}`. This repository refreshes its own snapshot with the "Refresh test
+snapshot" workflow (`make snapshot`).
 
 ## Development
 

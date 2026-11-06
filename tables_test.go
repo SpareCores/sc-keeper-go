@@ -259,6 +259,54 @@ func TestTableRowsCarryTheKeysOfTheJoin(t *testing.T) {
 	t.Error("aws us-east-1 missing")
 }
 
+func TestRegionLocationAndGreenEnergy(t *testing.T) {
+	srv := keepertest.New(t)
+	regions, err := keeper.New(srv.URL).Regions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var green, notGreen, unknown, withCity, withState, withCoords, withYear int
+	for _, r := range regions {
+		switch {
+		case r.GreenEnergy == nil:
+			unknown++
+		case *r.GreenEnergy:
+			green++
+		default:
+			notGreen++
+		}
+		if r.City != nil && *r.City != "" {
+			withCity++
+		}
+		if r.State != nil && *r.State != "" {
+			withState++
+		}
+		if r.Lat != nil && r.Lon != nil {
+			withCoords++
+		}
+		if r.FoundingYear != nil {
+			withYear++
+		}
+	}
+	// The three states of green_energy all occur in the snapshot.
+	if green == 0 || notGreen == 0 || unknown == 0 || withCity == 0 || withState == 0 || withCoords == 0 || withYear == 0 {
+		t.Errorf("green %d, not green %d, unknown %d, city %d, state %d, coordinates %d, year %d",
+			green, notGreen, unknown, withCity, withState, withCoords, withYear)
+	}
+}
+
+func TestRegionDecodesNullableFieldsAndIgnoresUnknownOnes(t *testing.T) {
+	var r keeper.Region
+	raw := `{"vendor_id":"gcp","region_id":"1","city":"Council Bluffs","state":null,"green_energy":false,"lat":41.5,"lon":-95.8,"founding_year":2009,"new_field":1}`
+	if err := json.Unmarshal([]byte(raw), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.City == nil || *r.City != "Council Bluffs" || r.State != nil || r.GreenEnergy == nil || *r.GreenEnergy ||
+		*r.Lat != 41.5 || *r.Lon != -95.8 || *r.FoundingYear != 2009 {
+		t.Errorf("%+v", r)
+	}
+}
+
 func TestUserAgent(t *testing.T) {
 	var got []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -7,6 +7,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 package snapshot
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -29,6 +30,16 @@ import (
 
 // Options configures Fetch.
 type Options struct {
+	// Dir is the output directory. It is replaced as a whole when the fetch
+	// succeeds; while it runs the files are written to Dir+".tmp".
+	Dir string
+	// Resume reuses the queries that an earlier run already wrote, in Dir or
+	// in an interrupted run's Dir+".tmp": a query is skipped when its file
+	// exists, is complete (its SHA-256 matches the one recorded), belongs to the
+	// same query (name, path, parameters) and was fetched from the Keeper
+	// database that is served now (same database hash). Everything else is
+	// fetched again. Without Resume the whole snapshot is fetched.
+	Resume bool
 	// KeeperURL is the Keeper API (default https://keeper.sparecores.net).
 	KeeperURL string
 	// APIKey is sent as a bearer token; /table/server_prices needs one.
@@ -41,6 +52,8 @@ type Options struct {
 	Sleep func(ctx context.Context, d time.Duration) error
 	// Now replaces the clock of fetched_at (tests).
 	Now func() time.Time
+	// Log, if set, receives one progress line per query.
+	Log func(format string, args ...any)
 }
 
 // Manifest is manifest.json: what was fetched, from which database.
@@ -83,23 +96,51 @@ type ManifestQuery struct {
 	Fields     []string `json:"fields,omitempty"`
 }
 
-// Snapshot is a fetched snapshot, not yet written.
+// Snapshot is a fetched snapshot, written to Dir.
 type Snapshot struct {
 	Manifest Manifest
-	// Files maps manifest file names to their (gzipped) content.
-	Files map[string][]byte
+	Dir      string
+	// Reused is the number of queries Resume took over from an earlier run.
+	Reused int
 }
+
+const progressFile = "progress.json"
 
 type fetcher struct {
 	opts   Options
 	client *http.Client
-	cache  map[string][]byte
+	// cache holds the small responses expansion needs (/table/region,
+	// /benchmark_configs), so that a query list asking for them too does not
+	// fetch them twice.
+	cache map[string][]byte
 }
 
-// Fetch runs every query of the list against Keeper. It fails if the Keeper
-// database changes while it runs. The result depends only on the data, except
-// for fetched_at.
+func (f *fetcher) logf(format string, args ...any) {
+	if f.opts.Log != nil {
+		f.opts.Log(format, args...)
+	}
+}
+
+// planned is one request of the expanded query list.
+type planned struct {
+	name   string
+	path   string
+	params map[string]any
+}
+
+func (p planned) file() string { return p.name + ".json.gz" }
+
+// Fetch runs every query of the list against Keeper and writes the result to
+// opts.Dir. The whole list is expanded and validated first (unknown or retired
+// regions, unknown benchmark configs, colliding file names) so that a bad list
+// fails before any data is fetched. Each response is streamed to its file as
+// it arrives; memory is bounded by the rows of one response, not by the
+// snapshot. It fails if the Keeper database changes while it runs. The result
+// depends only on the data, except for fetched_at.
 func Fetch(ctx context.Context, list *QueryList, opts Options) (*Snapshot, error) {
+	if opts.Dir == "" {
+		return nil, errors.New("Options.Dir is required") //nolint:staticcheck // user-facing message
+	}
 	if opts.KeeperURL == "" {
 		opts.KeeperURL = "https://keeper.sparecores.net"
 	}
@@ -113,6 +154,7 @@ func Fetch(ctx context.Context, list *QueryList, opts Options) (*Snapshot, error
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
+	opts.Dir = filepath.Clean(opts.Dir)
 	f := &fetcher{opts: opts, client: opts.HTTPClient, cache: map[string][]byte{}}
 	if f.client == nil {
 		f.client = &http.Client{Timeout: 5 * time.Minute}
@@ -122,64 +164,77 @@ func Fetch(ctx context.Context, list *QueryList, opts Options) (*Snapshot, error
 	if err != nil {
 		return nil, err
 	}
-	snap := &Snapshot{Files: map[string][]byte{}}
+	plan, err := f.plan(ctx, list)
+	if err != nil {
+		return nil, err
+	}
+
+	unlock, err := lockDir(opts.Dir)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	stage := opts.Dir + ".tmp"
+	if err := recoverReplace(opts.Dir, stage); err != nil {
+		return nil, err
+	}
+	prior := map[string]ManifestQuery{}
+	inDir := map[string]bool{} // prior queries whose file is in opts.Dir, not in the staging directory
+	if opts.Resume {
+		// The existing snapshot first, the interrupted run's files over it.
+		for _, src := range []struct{ dir, file string }{{opts.Dir, "manifest.json"}, {stage, progressFile}} {
+			m, err := loadManifest(filepath.Join(src.dir, src.file))
+			if err != nil || m.Keeper.DatabaseHash != health.DatabaseHash {
+				continue
+			}
+			for _, q := range m.Queries {
+				if verify(filepath.Join(src.dir, filepath.FromSlash(q.File)), q) == nil {
+					prior[q.File] = q
+					inDir[q.File] = src.dir == opts.Dir
+				}
+			}
+		}
+	} else if err := os.RemoveAll(stage); err != nil {
+		return nil, fmt.Errorf("clearing %s: %w", stage, err)
+	}
+	if err := os.MkdirAll(stage, 0o750); err != nil {
+		return nil, fmt.Errorf("writing snapshot: %w", err)
+	}
+
+	snap := &Snapshot{Dir: opts.Dir}
 	m := &snap.Manifest
 	m.KeeperURL = opts.KeeperURL
 	m.Vendors = map[string]ManifestVendor{}
 	for _, v := range list.Vendors {
 		m.Vendors[v.Name] = ManifestVendor{Region: v.Region, Spot: v.Spot}
 	}
-
-	record := func(e Entry, name string, params map[string]any) error {
-		raw, err := f.get(ctx, e.Path, params)
-		if err != nil {
-			return err
-		}
-		q, file, err := store(name, e.Path, params, raw)
-		if err != nil {
-			return err
-		}
-		if _, dup := snap.Files[q.File]; dup {
-			return fmt.Errorf("two queries write %s", q.File)
-		}
-		snap.Files[q.File] = file
-		m.Queries = append(m.Queries, q)
-		return nil
+	m.Keeper = ManifestKeeper{
+		Packages:            health.Packages,
+		DatabaseHash:        health.DatabaseHash,
+		DatabaseLastUpdated: time.Unix(int64(health.DatabaseLastUpdated), 0).UTC().Format("2006-01-02T15:04:05-07:00"),
 	}
 
-	for _, e := range list.Queries {
-		if err := record(e, e.Name, e.Params); err != nil {
+	for i, p := range plan {
+		dest := filepath.Join(stage, filepath.FromSlash(p.file()))
+		if q, ok := prior[p.file()]; ok && sameQuery(q, p) {
+			if inDir[p.file()] {
+				if err := copyFile(filepath.Join(opts.Dir, filepath.FromSlash(q.File)), dest); err != nil {
+					return nil, err
+				}
+			}
+			f.logf("[%d/%d] reusing %s", i+1, len(plan), p.name)
+			m.Queries = append(m.Queries, q)
+			snap.Reused++
+			continue
+		}
+		f.logf("[%d/%d] fetching %s", i+1, len(plan), p.name)
+		q, err := f.fetchQuery(ctx, p, dest)
+		if err != nil {
 			return nil, err
 		}
-	}
-	for _, v := range list.Vendors {
-		for _, e := range list.VendorQueries {
-			if e.RequiresSpot && !v.Spot {
-				continue
-			}
-			vars, err := f.vendorVars(ctx, v)
-			if err != nil {
-				return nil, err
-			}
-			if !e.Benchmarks {
-				if err := record(e, expandString(e.Name, vars), expandParams(e.Params, vars)); err != nil {
-					return nil, err
-				}
-				continue
-			}
-			for _, b := range list.Benchmarks {
-				config, err := f.canonicalConfig(ctx, b)
-				if err != nil {
-					return nil, err
-				}
-				bv := maps.Clone(vars)
-				bv["benchmark_id"] = b.ID
-				bv["benchmark_slug"] = strings.ReplaceAll(b.ID, ":", "_")
-				bv["benchmark_config"] = config
-				if err := record(e, expandString(e.Name, bv), expandParams(e.Params, bv)); err != nil {
-					return nil, err
-				}
-			}
+		m.Queries = append(m.Queries, q)
+		if err := writeProgress(stage, m); err != nil {
+			return nil, err
 		}
 	}
 
@@ -191,107 +246,540 @@ func Fetch(ctx context.Context, list *QueryList, opts Options) (*Snapshot, error
 		return nil, errors.New("Keeper data changed during the fetch, run again") //nolint:staticcheck // user-facing message
 	}
 	m.FetchedAt = opts.Now().UTC().Format("2006-01-02T15:04:05-07:00")
-	m.Keeper = ManifestKeeper{
-		Packages:            health.Packages,
-		DatabaseHash:        health.DatabaseHash,
-		DatabaseLastUpdated: time.Unix(int64(health.DatabaseLastUpdated), 0).UTC().Format("2006-01-02T15:04:05-07:00"),
+	if err := finish(stage, opts.Dir, m, plan); err != nil {
+		return nil, err
 	}
 	return snap, nil
 }
 
-// Write replaces dir with the snapshot: it is written next to dir and moved
-// into place, so a failed fetch or write leaves the old snapshot (only the
-// last two steps, removing dir and renaming, are not atomic).
-func (s *Snapshot) Write(dir string) error {
-	dir = filepath.Clean(dir)
-	tmp := dir + ".tmp"
-	if err := os.RemoveAll(tmp); err != nil {
-		return fmt.Errorf("clearing %s: %w", tmp, err)
+// finish prunes the staging directory to the planned files (leftovers of
+// killed runs and of queries since removed from the list must not reach the
+// output), writes the manifest and swaps the directory into place: the old
+// output is renamed to <dir>.old, the staging directory to <dir>, and the old
+// output removed. At every step either <dir> is the old snapshot, or
+// recoverReplace (the start of the next run) completes or undoes the swap.
+func finish(stage, dir string, m *Manifest, plan []planned) error {
+	keep := map[string]bool{"manifest.json": true}
+	for _, p := range plan {
+		keep[p.file()] = true
 	}
-	for name, content := range s.Files {
-		path := filepath.Join(tmp, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-			return fmt.Errorf("writing snapshot: %w", err)
-		}
-		if err := os.WriteFile(path, content, 0o600); err != nil {
-			return fmt.Errorf("writing snapshot: %w", err)
-		}
+	if err := pruneTo(stage, keep); err != nil {
+		return fmt.Errorf("pruning %s: %w", stage, err)
 	}
-	manifest, err := encode(s.Manifest, manifestFormat)
+	manifest, err := encode(*m, manifestFormat)
 	if err != nil {
 		return fmt.Errorf("encoding manifest: %w", err)
 	}
-	if err := os.MkdirAll(tmp, 0o750); err != nil {
-		return fmt.Errorf("writing snapshot: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(tmp, "manifest.json"), append(manifest, '\n'), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(stage, "manifest.json"), append(manifest, '\n'), 0o600); err != nil {
 		return fmt.Errorf("writing manifest: %w", err)
 	}
-	if err := os.RemoveAll(dir); err != nil {
+	old := dir + ".old"
+	if err := os.RemoveAll(old); err != nil {
 		return fmt.Errorf("replacing %s: %w", dir, err)
 	}
-	if err := os.Rename(tmp, dir); err != nil {
+	if err := os.Rename(dir, old); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("replacing %s: %w", dir, err)
+	}
+	if err := os.Rename(stage, dir); err != nil {
+		return fmt.Errorf("replacing %s: %w", dir, err)
+	}
+	return os.RemoveAll(old)
+}
+
+// pruneTo removes every file below dir whose slash-separated relative path is
+// not in keep, and the directories that end up empty.
+func pruneTo(dir string, keep map[string]bool) error {
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		if keep[filepath.ToSlash(rel)] {
+			return nil
+		}
+		return os.Remove(path)
+	})
+	if err != nil {
+		return err
+	}
+	var dirs []string
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err == nil && d.IsDir() && path != dir {
+			dirs = append(dirs, path)
+		}
+		return nil
+	})
+	for _, d := range slices.Backward(dirs) {
+		_ = os.Remove(d) // fails, and is kept, when not empty
 	}
 	return nil
 }
 
-// store canonicalises a response and gzips it. Lists are sorted (Keeper's
-// order among equally priced rows is not stable), keys are sorted, and the
-// gzip header carries no time, so identical data gives identical files.
-func store(name, path string, params map[string]any, raw []byte) (ManifestQuery, []byte, error) {
-	q := ManifestQuery{Name: name, Path: path, Params: params, File: name + ".json.gz"}
-	var tree any
-	var err error
-	if path == serverPricesPath {
-		q.Projection, q.Fields = projectionFlat, flatServerPriceFields
-		tree, err = projectFlat(raw, flatServerPriceFields)
-	} else {
-		tree, err = decode(raw)
+// recoverReplace repairs what a run killed inside finish left: when <dir> is
+// missing, a finished staging directory (it has its manifest) becomes <dir>,
+// otherwise <dir>.old is put back; a leftover <dir>.old next to <dir> is
+// removed. Resume then works as after any interruption.
+func recoverReplace(dir, stage string) error {
+	old := dir + ".old"
+	if _, err := os.Stat(old); err != nil {
+		return nil
 	}
+	if _, err := os.Stat(dir); err != nil {
+		from := old
+		if _, err := os.Stat(filepath.Join(stage, "manifest.json")); err == nil {
+			from = stage
+		}
+		if err := os.Rename(from, dir); err != nil {
+			return fmt.Errorf("recovering %s: %w", dir, err)
+		}
+	}
+	return os.RemoveAll(old)
+}
+
+// writeProgress records the queries finished so far, for Resume.
+func writeProgress(stage string, m *Manifest) error {
+	raw, err := json.Marshal(m)
 	if err != nil {
-		return ManifestQuery{}, nil, fmt.Errorf("%s: %w", name, err)
+		return err
 	}
+	tmp := filepath.Join(stage, progressFile+".part")
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return fmt.Errorf("writing progress: %w", err)
+	}
+	return os.Rename(tmp, filepath.Join(stage, progressFile))
+}
+
+func loadManifest(path string) (*Manifest, error) {
+	raw, err := os.ReadFile(path) //nolint:gosec // the output directory chosen by the user
+	if err != nil {
+		return nil, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber() // parameters compare as written, -1 stays -1
+	var m Manifest
+	if err := dec.Decode(&m); err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+// sameQuery says whether a recorded query is the planned one.
+func sameQuery(q ManifestQuery, p planned) bool {
+	if q.Name != p.name || q.Path != p.path || q.File != p.file() {
+		return false
+	}
+	want, err1 := encode(orEmpty(p.params), compactFormat)
+	have, err2 := encode(orEmpty(q.Params), compactFormat)
+	return err1 == nil && err2 == nil && bytes.Equal(want, have)
+}
+
+func orEmpty(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	return m
+}
+
+// verify checks that a query's file is complete and the recorded one: it
+// decompresses to the canonical JSON the manifest has the SHA-256 of.
+func verify(path string, q ManifestQuery) error {
+	file, err := os.Open(path) //nolint:gosec // the output directory chosen by the user
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+	zr, err := gzip.NewReader(file)
+	if err != nil {
+		return err
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, zr); err != nil { // also checks the gzip trailer
+		return err
+	}
+	if hex.EncodeToString(h.Sum(nil)) != q.SHA256 {
+		return errors.New("content differs from the manifest")
+	}
+	return nil
+}
+
+func copyFile(from, to string) error {
+	if err := os.MkdirAll(filepath.Dir(to), 0o750); err != nil {
+		return fmt.Errorf("writing snapshot: %w", err)
+	}
+	in, err := os.Open(from) //nolint:gosec // the output directory chosen by the user
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	out, err := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:gosec // as above
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+// plan expands the query list into the requests to make, in order, and checks
+// all of it: regions and benchmark configs resolve, file names are unique. It
+// reads only /table/region and /benchmark_configs. All problems are reported
+// together.
+func (f *fetcher) plan(ctx context.Context, list *QueryList) ([]planned, error) {
+	var plan []planned
+	var errs []error
+	for _, e := range list.Queries {
+		plan = append(plan, planned{e.Name, e.Path, e.Params})
+	}
+
+	// Benchmarks listed more than once under one id (Geekbench single- and
+	// multi-core) would collide on {benchmark_slug}: their slugs carry a short
+	// hash of the config. An id used once keeps its plain slug.
+	perID := map[string]int{}
+	for _, b := range list.Benchmarks {
+		perID[b.ID]++
+	}
+
+	vendorVars := map[string]map[string]string{}
+	benchVars := map[int]map[string]string{}
+	var regions []regionRow
+	haveRegions := false
+	for _, v := range list.Vendors {
+		for _, e := range list.VendorQueries {
+			if e.RequiresSpot && !v.Spot {
+				continue
+			}
+			vars, ok := vendorVars[v.Name]
+			if !ok {
+				if !haveRegions {
+					raw, err := f.get(ctx, "/table/region", nil)
+					if err != nil {
+						return nil, err
+					}
+					if err := json.Unmarshal(raw, &regions); err != nil {
+						return nil, fmt.Errorf("/table/region: %w", err)
+					}
+					haveRegions = true
+				}
+				id, err := resolveRegion(regions, v)
+				if err != nil {
+					errs = append(errs, err)
+				} else {
+					vars = map[string]string{"vendor": v.Name, "region": v.Region, "region_id": id}
+				}
+				vendorVars[v.Name] = vars
+			}
+			if vars == nil {
+				continue
+			}
+			if !e.Benchmarks {
+				plan = append(plan, planned{expandString(e.Name, vars), e.Path, expandParams(e.Params, vars)})
+				continue
+			}
+			for i, b := range list.Benchmarks {
+				bvars, ok := benchVars[i]
+				if !ok {
+					config, err := f.canonicalConfig(ctx, b)
+					if err != nil {
+						errs = append(errs, err)
+					} else {
+						slug := strings.ReplaceAll(b.ID, ":", "_")
+						if perID[b.ID] > 1 {
+							hash, err := configHash(b.Config)
+							if err != nil {
+								return nil, err
+							}
+							slug += "-" + hash
+						}
+						bvars = map[string]string{"benchmark_id": b.ID, "benchmark_slug": slug, "benchmark_config": config}
+					}
+					benchVars[i] = bvars
+				}
+				if bvars == nil {
+					continue
+				}
+				bv := maps.Clone(vars)
+				maps.Copy(bv, bvars)
+				plan = append(plan, planned{expandString(e.Name, bv), e.Path, expandParams(e.Params, bv)})
+			}
+		}
+	}
+
+	files := map[string]string{}
+	for _, p := range plan {
+		if other, dup := files[p.file()]; dup {
+			errs = append(errs, fmt.Errorf("two queries write %s (%s and %s)", p.file(), other, p.name))
+			continue
+		}
+		files[p.file()] = p.name
+	}
+	if err := errors.Join(errs...); err != nil {
+		return nil, fmt.Errorf("query list: %w", err)
+	}
+	return plan, nil
+}
+
+// configHash is the first 8 hex digits of the SHA-256 of the canonical JSON of
+// a benchmark config (sorted keys, compact), the same for the same config on
+// every run and machine.
+func configHash(config map[string]any) (string, error) {
+	canonical, err := encode(orEmpty(config), compactFormat)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(canonical)
+	return hex.EncodeToString(sum[:4]), nil
+}
+
+type regionRow struct {
+	VendorID     string   `json:"vendor_id"`
+	RegionID     string   `json:"region_id"`
+	APIReference string   `json:"api_reference"`
+	Status       string   `json:"status"`
+	Aliases      []string `json:"aliases"`
+}
+
+func (r regionRow) retired() bool { return r.Status == "inactive" }
+
+// resolveRegion finds the Keeper region id of a vendor's region, given as
+// region_id, api_reference or alias. Active regions win over retired ones, and
+// a match by region_id over api_reference over alias; a name that only matches
+// retired regions, or two active regions equally well, is an error.
+func resolveRegion(regions []regionRow, v Vendor) (string, error) {
+	type match struct {
+		row  regionRow
+		rank int
+	}
+	var matches []match
+	for _, r := range regions {
+		if r.VendorID != v.Name {
+			continue
+		}
+		switch {
+		case r.RegionID == v.Region:
+			matches = append(matches, match{r, 0})
+		case r.APIReference == v.Region:
+			matches = append(matches, match{r, 1})
+		case slices.Contains(r.Aliases, v.Region):
+			matches = append(matches, match{r, 2})
+		}
+	}
+	if len(matches) == 0 {
+		return "", fmt.Errorf("region %s of %s not found in /table/region", v.Region, v.Name)
+	}
+	best := matches[0]
+	for _, m := range matches[1:] {
+		if m.row.retired() != best.row.retired() {
+			if best.row.retired() {
+				best = m
+			}
+			continue
+		}
+		if m.rank < best.rank {
+			best = m
+		}
+	}
+	if best.row.retired() {
+		ids := make([]string, 0, len(matches))
+		for _, m := range matches {
+			ids = append(ids, m.row.RegionID)
+		}
+		return "", fmt.Errorf("region %s of %s only matches retired (inactive) regions: %s; use an active region",
+			v.Region, v.Name, strings.Join(ids, ", "))
+	}
+	for _, m := range matches {
+		if m.row.RegionID != best.row.RegionID && !m.row.retired() && m.rank == best.rank {
+			return "", fmt.Errorf("region %s of %s is ambiguous: active regions %s and %s",
+				v.Region, v.Name, best.row.RegionID, m.row.RegionID)
+		}
+	}
+	return best.row.RegionID, nil
+}
+
+// store canonicalises a response read from r and writes it gzipped to dest.
+// Lists are sorted (Keeper's order among equally priced rows is not stable),
+// keys are sorted, and the gzip header carries no time, so identical data
+// gives identical files. List rows are read one at a time and kept only in
+// their encoded form, so nothing like the whole parsed response is held.
+func store(r io.Reader, p planned, dest string) (ManifestQuery, error) {
+	q := ManifestQuery{Name: p.name, Path: p.path, Params: p.params, File: p.file()}
 	if q.Params == nil {
 		q.Params = map[string]any{}
 	}
-	if list, ok := tree.([]any); ok {
-		keys := make(map[int]string, len(list))
-		idx := make([]int, len(list))
-		for i, row := range list {
-			b, err := encode(row, sortKeyFormat)
-			if err != nil {
-				return ManifestQuery{}, nil, fmt.Errorf("%s: %w", name, err)
+	flat := p.path == serverPricesPath
+	if flat {
+		q.Projection, q.Fields = projectionFlat, flatServerPriceFields
+	}
+	fail := func(err error) (ManifestQuery, error) {
+		return ManifestQuery{}, fmt.Errorf("%s: %w", p.name, err)
+	}
+
+	br := bufio.NewReaderSize(r, 1<<20)
+	first, err := peekNonSpace(br)
+	if err != nil {
+		return fail(err)
+	}
+	dec := json.NewDecoder(br)
+	dec.UseNumber()
+
+	type row struct{ key, compact []byte }
+	var rows []row
+	var single []byte
+	isList := first == '['
+	switch {
+	case isList:
+		if _, err := dec.Token(); err != nil {
+			return fail(err)
+		}
+		rows = []row{}
+		for dec.More() {
+			var v any
+			if flat {
+				var raw map[string]json.RawMessage
+				if err := dec.Decode(&raw); err != nil {
+					return fail(err)
+				}
+				if v, err = projectRow(raw, flatServerPriceFields); err != nil {
+					return fail(err)
+				}
+			} else if err := dec.Decode(&v); err != nil {
+				return fail(err)
 			}
-			keys[i], idx[i] = string(b), i
+			key, err := encode(v, sortKeyFormat)
+			if err != nil {
+				return fail(err)
+			}
+			compact, err := encode(v, compactFormat)
+			if err != nil {
+				return fail(err)
+			}
+			rows = append(rows, row{key, compact})
 		}
-		slices.SortStableFunc(idx, func(a, b int) int { return strings.Compare(keys[a], keys[b]) })
-		sorted := make([]any, len(list))
-		for i, j := range idx {
-			sorted[i] = list[j]
+		if _, err := dec.Token(); err != nil {
+			return fail(err)
 		}
-		tree = sorted
-		n := len(sorted)
+	case flat:
+		return fail(errors.New("response is not a JSON array"))
+	default:
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			return fail(err)
+		}
+		if single, err = encode(v, compactFormat); err != nil {
+			return fail(err)
+		}
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return fail(errors.New("trailing data after the JSON value"))
+	}
+
+	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:gosec // the output directory chosen by the user
+	if err != nil {
+		return fail(err)
+	}
+	defer func() { _ = out.Close() }()
+	zw, err := gzip.NewWriterLevel(out, gzip.BestCompression)
+	if err != nil {
+		return fail(err)
+	}
+	h := sha256.New()
+	w := io.MultiWriter(zw, h)
+	if isList {
+		slices.SortStableFunc(rows, func(a, b row) int { return bytes.Compare(a.key, b.key) })
+		n := len(rows)
 		q.Rows = &n
+		_, err = io.WriteString(w, "[")
+		for i := 0; err == nil && i < len(rows); i++ {
+			if i > 0 {
+				_, err = io.WriteString(w, ",")
+			}
+			if err == nil {
+				_, err = w.Write(rows[i].compact)
+			}
+		}
+		if err == nil {
+			_, err = io.WriteString(w, "]")
+		}
+	} else {
+		_, err = w.Write(single)
 	}
-	canonical, err := encode(tree, compactFormat)
+	if err == nil {
+		err = zw.Close()
+	}
+	if err == nil {
+		err = out.Close()
+	}
 	if err != nil {
-		return ManifestQuery{}, nil, fmt.Errorf("%s: %w", name, err)
+		return fail(err)
 	}
-	sum := sha256.Sum256(canonical)
-	q.SHA256 = hex.EncodeToString(sum[:])
-	var gz bytes.Buffer
-	zw, err := gzip.NewWriterLevel(&gz, gzip.BestCompression)
+	q.SHA256 = hex.EncodeToString(h.Sum(nil))
+	return q, nil
+}
+
+// peekNonSpace returns the first byte of the JSON text without consuming it.
+func peekNonSpace(br *bufio.Reader) (byte, error) {
+	for {
+		b, err := br.ReadByte()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				err = io.ErrUnexpectedEOF
+			}
+			return 0, err
+		}
+		if b == ' ' || b == '\t' || b == '\n' || b == '\r' {
+			continue
+		}
+		return b, br.UnreadByte()
+	}
+}
+
+// projectRow keeps the given fields of one object.
+func projectRow(row map[string]json.RawMessage, fields []string) (map[string]any, error) {
+	flat := make(map[string]any, len(fields))
+	for _, f := range fields {
+		v, ok := row[f]
+		if !ok {
+			continue
+		}
+		tree, err := decode(v)
+		if err != nil {
+			return nil, fmt.Errorf("field %s: %w", f, err)
+		}
+		flat[f] = tree
+	}
+	return flat, nil
+}
+
+// fetchQuery streams one query to dest (through a .part file renamed when
+// complete, so a file that exists is a whole one).
+func (f *fetcher) fetchQuery(ctx context.Context, p planned, dest string) (ManifestQuery, error) {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
+		return ManifestQuery{}, fmt.Errorf("writing snapshot: %w", err)
+	}
+	part := dest + ".part"
+	var q ManifestQuery
+	sink := func(r io.Reader) (err error) {
+		q, err = store(r, p, part)
+		return err
+	}
+	var err error
+	if raw, ok := f.cache[p.path+"?"+encodeParams(p.params)]; ok {
+		err = sink(bytes.NewReader(raw))
+	} else {
+		err = f.fetch(ctx, p.path, p.params, sink)
+	}
 	if err != nil {
-		return ManifestQuery{}, nil, err
+		_ = os.Remove(part)
+		return ManifestQuery{}, err
 	}
-	if _, err := zw.Write(canonical); err != nil {
-		return ManifestQuery{}, nil, err
+	if err := os.Rename(part, dest); err != nil {
+		return ManifestQuery{}, fmt.Errorf("writing snapshot: %w", err)
 	}
-	if err := zw.Close(); err != nil {
-		return ManifestQuery{}, nil, err
-	}
-	return q, gz.Bytes(), nil
+	return q, nil
 }
 
 type health struct {
@@ -300,10 +788,17 @@ type health struct {
 	Packages            map[string]string `json:"packages"`
 }
 
+func readAll(dst *[]byte) func(io.Reader) error {
+	return func(r io.Reader) (err error) {
+		*dst, err = io.ReadAll(r)
+		return err
+	}
+}
+
 func (f *fetcher) health(ctx context.Context) (health, error) {
 	// Never cached: it is read before and after to detect a changing database.
-	raw, err := f.fetch(ctx, "/healthcheck", nil)
-	if err != nil {
+	var raw []byte
+	if err := f.fetch(ctx, "/healthcheck", nil, readAll(&raw)); err != nil {
 		return health{}, err
 	}
 	var h health
@@ -313,39 +808,18 @@ func (f *fetcher) health(ctx context.Context) (health, error) {
 	return h, nil
 }
 
+// get fetches a small response into memory, once.
 func (f *fetcher) get(ctx context.Context, path string, params map[string]any) ([]byte, error) {
 	key := path + "?" + encodeParams(params)
 	if raw, ok := f.cache[key]; ok {
 		return raw, nil
 	}
-	raw, err := f.fetch(ctx, path, params)
-	if err != nil {
+	var raw []byte
+	if err := f.fetch(ctx, path, params, readAll(&raw)); err != nil {
 		return nil, err
 	}
 	f.cache[key] = raw
 	return raw, nil
-}
-
-func (f *fetcher) vendorVars(ctx context.Context, v Vendor) (map[string]string, error) {
-	raw, err := f.get(ctx, "/table/region", nil)
-	if err != nil {
-		return nil, err
-	}
-	var regions []struct {
-		VendorID     string   `json:"vendor_id"`
-		RegionID     string   `json:"region_id"`
-		APIReference string   `json:"api_reference"`
-		Aliases      []string `json:"aliases"`
-	}
-	if err := json.Unmarshal(raw, &regions); err != nil {
-		return nil, fmt.Errorf("/table/region: %w", err)
-	}
-	for _, r := range regions {
-		if r.VendorID == v.Name && (v.Region == r.RegionID || v.Region == r.APIReference || slices.Contains(r.Aliases, v.Region)) {
-			return map[string]string{"vendor": v.Name, "region": v.Region, "region_id": r.RegionID}, nil
-		}
-	}
-	return nil, fmt.Errorf("region %s of %s not found in /table/region", v.Region, v.Name)
 }
 
 // canonicalConfig finds the config string Keeper matches exactly: the entry
@@ -362,11 +836,7 @@ func (f *fetcher) canonicalConfig(ctx context.Context, b Benchmark) (string, err
 	if err := json.Unmarshal(raw, &configs); err != nil {
 		return "", fmt.Errorf("/benchmark_configs: %w", err)
 	}
-	want := b.Config
-	if want == nil {
-		want = map[string]any{}
-	}
-	wantJSON, err := encode(want, compactFormat)
+	wantJSON, err := encode(orEmpty(b.Config), compactFormat)
 	if err != nil {
 		return "", err
 	}
@@ -439,9 +909,27 @@ func paramString(v any) string {
 	}
 }
 
-// fetch performs one GET with retries; a rate-limit window nearly used up is
+// errReader remembers a failure of the underlying body, to tell a broken
+// transfer (retry) from a response that is bad as delivered (fail).
+type errReader struct {
+	r   io.Reader
+	err error
+}
+
+func (e *errReader) Read(p []byte) (int, error) {
+	n, err := e.r.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) {
+		e.err = err
+	}
+	return n, err
+}
+
+// fetch performs one GET with retries and hands the body of a successful
+// response to sink as a stream. A sink failing on a broken transfer is retried
+// like a failed request (the sink is called again from the start); a sink
+// failing on a complete body is not. A rate-limit window nearly used up is
 // waited out (the anonymous limit is 300 credits per minute).
-func (f *fetcher) fetch(ctx context.Context, path string, params map[string]any) ([]byte, error) {
+func (f *fetcher) fetch(ctx context.Context, path string, params map[string]any, sink func(io.Reader) error) error {
 	u := f.opts.KeeperURL + path
 	if len(params) > 0 {
 		u += "?" + encodeParams(params)
@@ -450,7 +938,7 @@ func (f *fetcher) fetch(ctx context.Context, path string, params map[string]any)
 	for attempt := 0; attempt <= f.opts.Retries; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		req.Header.Set("User-Agent", "sc-keeper-go-snapshot")
 		req.Header.Set("Accept", "application/json")
@@ -460,22 +948,34 @@ func (f *fetcher) fetch(ctx context.Context, path string, params map[string]any)
 		resp, err := f.client.Do(req)
 		var delay time.Duration
 		if err == nil {
-			body, readErr := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
 			switch {
-			case readErr != nil:
-				err = readErr
 			case resp.StatusCode >= 200 && resp.StatusCode <= 299:
-				if rem, convErr := strconv.Atoi(resp.Header.Get("X-Ratelimit-Remaining")); convErr == nil && rem < 30 {
-					if err := f.opts.Sleep(ctx, 30*time.Second); err != nil {
-						return nil, err
-					}
+				body := &errReader{r: resp.Body}
+				sinkErr := sink(body)
+				if sinkErr == nil {
+					// Drain, so the connection is reused and a transfer error shows.
+					_, _ = io.Copy(io.Discard, body)
+					sinkErr = body.err
 				}
-				return body, nil
+				_ = resp.Body.Close()
+				if sinkErr == nil {
+					if rem, convErr := strconv.Atoi(resp.Header.Get("X-Ratelimit-Remaining")); convErr == nil && rem < 30 {
+						if err := f.opts.Sleep(ctx, 30*time.Second); err != nil {
+							return err
+						}
+					}
+					return nil
+				}
+				if body.err == nil {
+					return sinkErr
+				}
+				err = fmt.Errorf("GET %s: %w", u, sinkErr)
 			default:
-				err = fmt.Errorf("GET %s: HTTP %d: %.200s", u, resp.StatusCode, bytes.TrimSpace(body))
+				snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+				_ = resp.Body.Close()
+				err = fmt.Errorf("GET %s: HTTP %d: %.200s", u, resp.StatusCode, bytes.TrimSpace(snippet))
 				if !slices.Contains([]int{429, 500, 502, 503, 504}, resp.StatusCode) {
-					return nil, err
+					return err
 				}
 				if s, convErr := strconv.Atoi(resp.Header.Get("Retry-After")); convErr == nil && s >= 0 {
 					delay = time.Duration(s) * time.Second
@@ -488,11 +988,11 @@ func (f *fetcher) fetch(ctx context.Context, path string, params map[string]any)
 		}
 		if attempt < f.opts.Retries {
 			if err := f.opts.Sleep(ctx, delay); err != nil {
-				return nil, err
+				return err
 			}
 		}
 	}
-	return nil, lastErr
+	return lastErr
 }
 
 func sleep(ctx context.Context, d time.Duration) error {
@@ -515,42 +1015,4 @@ const (
 // the flat projection; keeper.ZonePrice decodes exactly these.
 var flatServerPriceFields = []string{
 	"vendor_id", "region_id", "zone_id", "server_id", "operating_system", "allocation", "unit", "price", "currency", "status", "observed_at",
-}
-
-// projectFlat keeps the given fields of every element of a JSON array of
-// objects. The array is walked element by element, so the nested objects of a
-// large response are never held as a tree.
-func projectFlat(raw []byte, fields []string) ([]any, error) {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	if tok, err := dec.Token(); err != nil || tok != json.Delim('[') {
-		if err == nil {
-			err = errors.New("response is not a JSON array")
-		}
-		return nil, err
-	}
-	rows := []any{}
-	for dec.More() {
-		var row map[string]json.RawMessage
-		if err := dec.Decode(&row); err != nil {
-			return nil, err
-		}
-		flat := make(map[string]any, len(fields))
-		for _, f := range fields {
-			v, ok := row[f]
-			if !ok {
-				continue
-			}
-			tree, err := decode(v)
-			if err != nil {
-				return nil, fmt.Errorf("field %s: %w", f, err)
-			}
-			flat[f] = tree
-		}
-		rows = append(rows, flat)
-	}
-	if _, err := dec.Token(); err != nil {
-		return nil, err
-	}
-	return rows, nil
 }

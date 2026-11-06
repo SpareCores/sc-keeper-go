@@ -110,7 +110,22 @@ type Region struct {
 	DisplayName  string   `json:"display_name"`
 	Aliases      []string `json:"aliases"`
 	CountryID    string   `json:"country_id"`
-	Status       string   `json:"status"`
+	// State, City, AddressLine and ZipCode are the optional location of the
+	// region (null in Keeper when unknown).
+	State       *string `json:"state"`
+	City        *string `json:"city"`
+	AddressLine *string `json:"address_line"`
+	ZipCode     *string `json:"zip_code"`
+	// Lat and Lon are the known or approximate coordinates.
+	Lat *float64 `json:"lat"`
+	Lon *float64 `json:"lon"`
+	// FoundingYear is the 4-digit year the region was founded.
+	FoundingYear *int `json:"founding_year"`
+	// GreenEnergy says whether the region is 100% powered by renewable
+	// energy: true, false, or nil when Keeper does not know.
+	GreenEnergy *bool `json:"green_energy"`
+	// Status is "active" or "inactive" (a retired region).
+	Status string `json:"status"`
 }
 
 // Zone is one row of GET /table/zone.

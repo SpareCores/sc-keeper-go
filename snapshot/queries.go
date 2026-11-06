@@ -38,8 +38,10 @@ import (
 //
 // Names and string parameter values may use {vendor}, {region} (the region
 // of the vendor entry), {region_id} (its Keeper region id, found in
-// /table/region by region_id, api_reference or alias), and, with
-// benchmarks, {benchmark_id}, {benchmark_slug} (the id with ":" as "_") and
+// /table/region by region_id, api_reference or alias; active regions are
+// preferred and retired ones are an error), and, with
+// benchmarks, {benchmark_id}, {benchmark_slug} (the id with ":" as "_", plus "-" and
+// a short hash of the config when the id is listed more than once) and
 // {benchmark_config} (the canonical config string of /benchmark_configs).
 type QueryList struct {
 	Vendors       []Vendor    `json:"vendors,omitempty"`
