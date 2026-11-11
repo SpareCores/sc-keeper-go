@@ -71,6 +71,9 @@ prices, err := c.TableServerPrices(ctx, keeper.PriceQuery{
 })
 ```
 
+`ServerPrice` and `ZonePrice` carry `PriceTiered` (`[]PriceTier{Lower, Upper, Price}`
+in hours; the last `Upper` is `+Inf`, decoded from the string `"Infinity"`).
+
 Cacheable requests carry the database hash of `/healthcheck` as `data_version`,
 so all requests of a refresh see one version of the data.
 

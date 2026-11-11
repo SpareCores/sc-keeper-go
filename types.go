@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -228,9 +229,11 @@ type ServerPrice struct {
 	// Price is per Unit, in Currency.
 	Price        float64 `json:"price"`
 	PriceUpfront float64 `json:"price_upfront"`
-	Currency     string  `json:"currency"`
-	Status       string  `json:"status"`
-	ObservedAt   string  `json:"observed_at"`
+	// PriceTiered is the tiered pricing (hours), empty for flat prices.
+	PriceTiered []PriceTier `json:"price_tiered"`
+	Currency    string      `json:"currency"`
+	Status      string      `json:"status"`
+	ObservedAt  string      `json:"observed_at"`
 }
 
 // ZonePrice is one row of GET /server_prices (the anonymous search endpoint),
@@ -247,11 +250,13 @@ type ZonePrice struct {
 	OperatingSystem string          `json:"operating_system"`
 	Allocation      PriceAllocation `json:"allocation"`
 	// Unit is the billing unit (hour for compute); Price is per Unit.
-	Unit       string  `json:"unit"`
-	Price      float64 `json:"price"`
-	Currency   string  `json:"currency"`
-	Status     string  `json:"status"`
-	ObservedAt string  `json:"observed_at"`
+	Unit  string  `json:"unit"`
+	Price float64 `json:"price"`
+	// PriceTiered is the tiered pricing (hours), empty for flat prices.
+	PriceTiered []PriceTier `json:"price_tiered"`
+	Currency    string      `json:"currency"`
+	Status      string      `json:"status"`
+	ObservedAt  string      `json:"observed_at"`
 }
 
 // Vendor is one row of GET /table/vendor (anonymous). The billing fields are
@@ -307,4 +312,63 @@ func (v *Vendor) UnmarshalJSON(b []byte) error {
 		return fmt.Errorf("keeper: stopped_server_charged %s is not a boolean", raw)
 	}
 	return nil
+}
+
+// PriceTier is one entry of price_tiered: Price applies from Lower up to Upper
+// (hours; Upper is +Inf for the last tier).
+type PriceTier struct {
+	Lower float64 `json:"lower"`
+	Upper float64 `json:"upper"`
+	Price float64 `json:"price"`
+}
+
+// UnmarshalJSON accepts numbers as well as the strings "Infinity",
+// "-Infinity" and "NaN" that Python's JSON encoder produces.
+func (t *PriceTier) UnmarshalJSON(b []byte) error {
+	var w struct {
+		Lower json.RawMessage `json:"lower"`
+		Upper json.RawMessage `json:"upper"`
+		Price json.RawMessage `json:"price"`
+	}
+	if err := json.Unmarshal(b, &w); err != nil {
+		return err
+	}
+	var err error
+	if t.Lower, err = pythonFloat(w.Lower); err != nil {
+		return fmt.Errorf("keeper: price tier lower: %w", err)
+	}
+	if t.Upper, err = pythonFloat(w.Upper); err != nil {
+		return fmt.Errorf("keeper: price tier upper: %w", err)
+	}
+	if t.Price, err = pythonFloat(w.Price); err != nil {
+		return fmt.Errorf("keeper: price tier price: %w", err)
+	}
+	return nil
+}
+
+// pythonFloat decodes a JSON number or one of the strings Infinity, -Infinity,
+// NaN. A missing or null value is 0.
+func pythonFloat(raw json.RawMessage) (float64, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0, nil
+	}
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return 0, err
+		}
+		switch s {
+		case "Infinity", "+Infinity", "inf":
+			return math.Inf(1), nil
+		case "-Infinity", "-inf":
+			return math.Inf(-1), nil
+		case "NaN", "nan":
+			return math.NaN(), nil
+		}
+		return 0, fmt.Errorf("unexpected string %q", s)
+	}
+	var f float64
+	err := json.Unmarshal(raw, &f)
+	return f, err
 }

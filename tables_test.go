@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -396,5 +397,31 @@ func TestVendorUnknownAndIntBooleans(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(`[{"stopped_server_charged":"yes"}]`), &rows); err == nil {
 		t.Error("a non-boolean must fail")
+	}
+}
+
+func TestPriceTiered(t *testing.T) {
+	const body = `[{"vendor_id":"v","price":1,"price_tiered":[
+	 {"lower":0,"upper":"Infinity","price":0.5},
+	 {"lower":0,"upper":730,"price":0.4},
+	 {"lower":730.5,"upper":"Infinity","price":0.2}]},
+	 {"vendor_id":"v","price":2,"price_tiered":[]}]`
+	var rows []keeper.ServerPrice
+	if err := json.Unmarshal([]byte(body), &rows); err != nil {
+		t.Fatal(err)
+	}
+	tiers := rows[0].PriceTiered
+	if len(tiers) != 3 || !math.IsInf(tiers[0].Upper, 1) || tiers[1].Upper != 730 || tiers[2].Lower != 730.5 || tiers[2].Price != 0.2 {
+		t.Errorf("tiers %+v", tiers)
+	}
+	if len(rows[1].PriceTiered) != 0 {
+		t.Errorf("flat price has tiers: %+v", rows[1])
+	}
+	var zp []keeper.ZonePrice
+	if err := json.Unmarshal([]byte(body), &zp); err != nil || len(zp[0].PriceTiered) != 3 {
+		t.Errorf("zone price: %v %+v", err, zp)
+	}
+	if err := json.Unmarshal([]byte(`[{"price_tiered":[{"upper":"bogus"}]}]`), &rows); err == nil {
+		t.Error("bad tier must fail")
 	}
 }
