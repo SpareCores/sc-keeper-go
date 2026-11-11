@@ -320,3 +320,81 @@ func TestUserAgent(t *testing.T) {
 		t.Errorf("User-Agent headers: %v", got)
 	}
 }
+
+func tableVendorSample(t *testing.T) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("keepertest", "testdata", "table_vendor_sample.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func TestVendors(t *testing.T) {
+	var urls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		urls = append(urls, r.URL.String())
+		if r.URL.Path == "/healthcheck" {
+			_, _ = w.Write([]byte(`{"database_hash":"h1","database_last_updated":1.0}`))
+			return
+		}
+		_, _ = w.Write(tableVendorSample(t))
+	}))
+	defer srv.Close()
+
+	rows, err := keeper.New(srv.URL).Vendors(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 8 || urls[0] != "/table/vendor" {
+		t.Fatalf("rows %d, urls %v", len(rows), urls)
+	}
+	by := map[string]keeper.Vendor{}
+	for _, v := range rows {
+		by[v.VendorID] = v
+	}
+	aws, ali := by["aws"], by["alicloud"]
+	if aws.Name != "Amazon Web Services" || aws.CountryID != "US" || *aws.FoundingYear != 2002 {
+		t.Errorf("aws %+v", aws)
+	}
+	if *aws.BillingIncrementSeconds != 1 || *aws.MinimumBillingSeconds != 60 || *aws.StoppedServerCharged || aws.BillingComment != nil {
+		t.Errorf("aws billing %+v", aws)
+	}
+	if !*ali.StoppedServerCharged || *ali.MinimumBillingSeconds != 600 || ali.BillingComment == nil {
+		t.Errorf("alicloud billing %+v", ali)
+	}
+
+	// Through the Fetcher the request is pinned to the data version.
+	urls = nil
+	if _, err := keeper.NewFetcher(keeper.New(srv.URL)).Vendors(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(urls, "/table/vendor?data_version=h1") {
+		t.Errorf("not pinned: %v", urls)
+	}
+}
+
+func TestVendorUnknownAndIntBooleans(t *testing.T) {
+	var rows []keeper.Vendor
+	body := `[{"vendor_id":"a","stopped_server_charged":1,"billing_increment_seconds":1},
+	 {"vendor_id":"b","stopped_server_charged":0},
+	 {"vendor_id":"c","stopped_server_charged":null,"billing_increment_seconds":null},
+	 {"vendor_id":"d"}]`
+	if err := json.Unmarshal([]byte(body), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if !*rows[0].StoppedServerCharged || *rows[1].StoppedServerCharged {
+		t.Errorf("0/1: %+v %+v", rows[0], rows[1])
+	}
+	if rows[0].BillingIncrementSeconds == nil || rows[0].VendorID != "a" {
+		t.Errorf("plain fields lost: %+v", rows[0])
+	}
+	for _, v := range rows[2:] {
+		if v.StoppedServerCharged != nil || v.BillingIncrementSeconds != nil || v.MinimumBillingSeconds != nil || v.BillingComment != nil {
+			t.Errorf("%s: unknown must be nil: %+v", v.VendorID, v)
+		}
+	}
+	if err := json.Unmarshal([]byte(`[{"stopped_server_charged":"yes"}]`), &rows); err == nil {
+		t.Error("a non-boolean must fail")
+	}
+}

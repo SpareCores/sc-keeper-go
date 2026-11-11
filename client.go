@@ -203,6 +203,18 @@ func (c *Client) zonesAt(ctx context.Context, version string) ([]Zone, error) {
 	return out, err
 }
 
+// Vendors returns the vendor table (GET /table/vendor, anonymous), including
+// the billing fields.
+func (c *Client) Vendors(ctx context.Context) ([]Vendor, error) {
+	return c.vendorsAt(ctx, "")
+}
+
+func (c *Client) vendorsAt(ctx context.Context, version string) ([]Vendor, error) {
+	var out []Vendor
+	err := c.get(ctx, "/table/vendor", versionParams(version), &out)
+	return out, err
+}
+
 // TableServers returns the Server table of every vendor (GET /table/server,
 // about 12 MB of JSON, no filters).
 func (c *Client) TableServers(ctx context.Context) ([]TableServer, error) {

@@ -8,7 +8,7 @@ and SCarpenter.
 
 | Package | What it is |
 |---|---|
-| `github.com/SpareCores/sc-keeper-go` (`keeper`) | Keeper client: `/servers`, `/benchmark_configs`, `/table/region`, `/table/zone`, `/table/server`, `/table/server_prices` (API key), `/server_prices` (anonymous, per-zone prices), `/healthcheck`. Retries with backoff, `Retry-After`, region chunking, a per-cycle memoising `Fetcher`. |
+| `github.com/SpareCores/sc-keeper-go` (`keeper`) | Keeper client: `/servers`, `/benchmark_configs`, `/table/region`, `/table/zone`, `/table/vendor` (with billing fields), `/table/server`, `/table/server_prices` (API key), `/server_prices` (anonymous, per-zone prices), `/healthcheck`. Retries with backoff, `Retry-After`, region chunking, a per-cycle memoising `Fetcher`. |
 | `.../selection` | Candidates from Keeper rows, selector filters, data-quality policy, ranking (families, band), the Keeper query plan. Pure functions, no Kubernetes client. |
 | `.../selection/api` | The `Selector`, `Ranking`, `Churn` API types with kubebuilder markers and generated DeepCopy, to embed in a CRD. |
 | `.../selection/churn` | Hysteresis for instance types leaving a selection. |
@@ -36,6 +36,7 @@ servers, err := f.Servers(ctx, keeper.Query{
 	Allocation: keeper.AllocationOnDemand,
 })
 zones, err := f.Zones(ctx)         // /table/zone: zone_id, name, api_reference, status
+vendors, err := f.Vendors(ctx)     // /table/vendor: billing increment/minimum, stopped-server charge (nil = unknown)
 table, err := f.TableServers(ctx)  // /table/server: the whole Server table (about 12 MB)
 ```
 

@@ -6,15 +6,20 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 // Package keeper is a client of the Spare Cores Keeper API
 // (https://keeper.sparecores.net). It only reads: /servers,
-// /benchmark_configs, /table/region, /table/zone, /table/server,
-// /table/server_prices and /healthcheck.
+// /benchmark_configs, /table/region, /table/zone, /table/vendor,
+// /table/server, /table/server_prices and /healthcheck.
 //
 // Responses are decoded by field name and unknown fields are ignored, so
 // additive schema changes of sc-crawler do not break the client. The decoded
 // schema is sc-crawler 0.10 (accelerator_* instead of gpu_*).
 package keeper
 
-import "time"
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 // Allocation is Keeper's best_price_allocation: which price a /servers query
 // reports and filters on.
@@ -247,4 +252,59 @@ type ZonePrice struct {
 	Currency   string  `json:"currency"`
 	Status     string  `json:"status"`
 	ObservedAt string  `json:"observed_at"`
+}
+
+// Vendor is one row of GET /table/vendor (anonymous). The billing fields are
+// nil when Keeper does not know them.
+type Vendor struct {
+	VendorID     string  `json:"vendor_id"`
+	Name         string  `json:"name"`
+	Logo         *string `json:"logo"`
+	Homepage     *string `json:"homepage"`
+	StatusPage   *string `json:"status_page"`
+	CountryID    string  `json:"country_id"`
+	State        *string `json:"state"`
+	City         *string `json:"city"`
+	AddressLine  *string `json:"address_line"`
+	ZipCode      *string `json:"zip_code"`
+	FoundingYear *int    `json:"founding_year"`
+	// Status is "active" or "inactive".
+	Status     string `json:"status"`
+	ObservedAt string `json:"observed_at"`
+
+	// BillingIncrementSeconds is the granularity compute is billed in.
+	BillingIncrementSeconds *int `json:"billing_increment_seconds"`
+	// MinimumBillingSeconds is the minimum billed duration of a run.
+	MinimumBillingSeconds *int `json:"minimum_billing_seconds"`
+	// StoppedServerCharged says whether a stopped server is still charged.
+	StoppedServerCharged *bool `json:"stopped_server_charged"`
+	// BillingComment is free text on billing exceptions.
+	BillingComment *string `json:"billing_comment"`
+}
+
+// UnmarshalJSON decodes stopped_server_charged from true/false as well as
+// 0/1 (some Keeper snapshots serve the column as an integer).
+func (v *Vendor) UnmarshalJSON(b []byte) error {
+	type plain Vendor
+	aux := struct {
+		*plain
+		StoppedServerCharged json.RawMessage `json:"stopped_server_charged"`
+	}{plain: (*plain)(v)}
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+	v.StoppedServerCharged = nil
+	raw := bytes.TrimSpace(aux.StoppedServerCharged)
+	switch string(raw) {
+	case "", "null":
+	case "true", "1":
+		t := true
+		v.StoppedServerCharged = &t
+	case "false", "0":
+		f := false
+		v.StoppedServerCharged = &f
+	default:
+		return fmt.Errorf("keeper: stopped_server_charged %s is not a boolean", raw)
+	}
+	return nil
 }

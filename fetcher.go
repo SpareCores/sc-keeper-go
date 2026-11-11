@@ -146,6 +146,17 @@ func (f *Fetcher) Zones(ctx context.Context) ([]Zone, error) {
 	return v.([]Zone), nil
 }
 
+// Vendors returns (or reuses) /table/vendor.
+func (f *Fetcher) Vendors(ctx context.Context) ([]Vendor, error) {
+	v, err := f.memo(ctx, "/table/vendor", func(ctx context.Context) (any, error) {
+		return f.client.vendorsAt(ctx, f.dataVersion(ctx))
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]Vendor), nil
+}
+
 // TableServers returns (or reuses) /table/server. The returned slice is
 // shared and must not be modified.
 func (f *Fetcher) TableServers(ctx context.Context) ([]TableServer, error) {
