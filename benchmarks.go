@@ -120,8 +120,7 @@ func (c *BenchmarkCatalog) Resolve(id string, config []byte) (BenchmarkKey, erro
 	if len(entries) == 0 {
 		return BenchmarkKey{}, &BenchmarkConfigError{ID: id, Reason: "not in /benchmark_configs"}
 	}
-	trimmed := bytes.TrimSpace(config)
-	if len(trimmed) == 0 || string(trimmed) == "null" {
+	if isNull(config) {
 		if len(entries) == 1 {
 			return BenchmarkKey{ID: id, Config: entries[0].canonical}, nil
 		}
@@ -130,6 +129,7 @@ func (c *BenchmarkCatalog) Resolve(id string, config []byte) (BenchmarkKey, erro
 			Reason: fmt.Sprintf("a config is required, one of %s", strings.Join(c.Configs(id), ", ")),
 		}
 	}
+	trimmed := bytes.TrimSpace(config)
 	want, err := parseConfig(trimmed)
 	if err != nil {
 		return BenchmarkKey{}, &BenchmarkConfigError{ID: id, Config: string(trimmed), Reason: "not a JSON object: " + err.Error()}

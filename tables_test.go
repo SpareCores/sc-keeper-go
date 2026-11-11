@@ -373,6 +373,24 @@ func TestVendors(t *testing.T) {
 	if !slices.Contains(urls, "/table/vendor?data_version=h1") {
 		t.Errorf("not pinned: %v", urls)
 	}
+
+	// The Fetcher memoises the table for the cycle.
+	urls = nil
+	f := keeper.NewFetcher(keeper.New(srv.URL))
+	for range 2 {
+		if _, err := f.Vendors(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	vendorCalls := 0
+	for _, u := range urls {
+		if strings.HasPrefix(u, "/table/vendor") {
+			vendorCalls++
+		}
+	}
+	if vendorCalls != 1 {
+		t.Errorf("/table/vendor fetched %d times: %v", vendorCalls, urls)
+	}
 }
 
 func TestVendorUnknownAndIntBooleans(t *testing.T) {
@@ -423,5 +441,23 @@ func TestPriceTiered(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(`[{"price_tiered":[{"upper":"bogus"}]}]`), &rows); err == nil {
 		t.Error("bad tier must fail")
+	}
+
+	var odd keeper.PriceTier
+	if err := json.Unmarshal([]byte(`{"lower":"-Infinity","upper":null,"price":"NaN"}`), &odd); err != nil {
+		t.Fatal(err)
+	}
+	if !math.IsInf(odd.Lower, -1) || odd.Upper != 0 || !math.IsNaN(odd.Price) {
+		t.Errorf("odd tier %+v", odd)
+	}
+
+	// A decoded row encodes again and round-trips.
+	raw, err := json.Marshal(tiers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var again []keeper.PriceTier
+	if err := json.Unmarshal(raw, &again); err != nil || !slices.Equal(again, tiers) {
+		t.Errorf("round trip %s: %v %+v", raw, err, again)
 	}
 }

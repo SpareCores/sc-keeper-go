@@ -299,9 +299,11 @@ func (v *Vendor) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	v.StoppedServerCharged = nil
+	if isNull(aux.StoppedServerCharged) {
+		return nil
+	}
 	raw := bytes.TrimSpace(aux.StoppedServerCharged)
 	switch string(raw) {
-	case "", "null":
 	case "true", "1":
 		t := true
 		v.StoppedServerCharged = &t
@@ -323,7 +325,7 @@ type PriceTier struct {
 }
 
 // UnmarshalJSON accepts numbers as well as the strings "Infinity",
-// "-Infinity" and "NaN" that Python's JSON encoder produces.
+// "-Infinity" and "NaN" that Keeper serves for non-finite floats.
 func (t *PriceTier) UnmarshalJSON(b []byte) error {
 	var w struct {
 		Lower json.RawMessage `json:"lower"`
@@ -346,24 +348,42 @@ func (t *PriceTier) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// MarshalJSON writes infinite and NaN bounds as the strings Keeper serves, so
+// a decoded row encodes again (encoding/json rejects them as numbers).
+func (t PriceTier) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Lower any `json:"lower"`
+		Upper any `json:"upper"`
+		Price any `json:"price"`
+	}{pythonFloatValue(t.Lower), pythonFloatValue(t.Upper), pythonFloatValue(t.Price)})
+}
+
+// Keeper (pydantic, ser_json_inf_nan="strings") serves non-finite floats as
+// these strings.
+const (
+	posInfinity = "Infinity"
+	negInfinity = "-Infinity"
+	notANumber  = "NaN"
+)
+
 // pythonFloat decodes a JSON number or one of the strings Infinity, -Infinity,
 // NaN. A missing or null value is 0.
 func pythonFloat(raw json.RawMessage) (float64, error) {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 || string(raw) == "null" {
+	if isNull(raw) {
 		return 0, nil
 	}
+	raw = bytes.TrimSpace(raw)
 	if raw[0] == '"' {
 		var s string
 		if err := json.Unmarshal(raw, &s); err != nil {
 			return 0, err
 		}
 		switch s {
-		case "Infinity", "+Infinity", "inf":
+		case posInfinity:
 			return math.Inf(1), nil
-		case "-Infinity", "-inf":
+		case negInfinity:
 			return math.Inf(-1), nil
-		case "NaN", "nan":
+		case notANumber:
 			return math.NaN(), nil
 		}
 		return 0, fmt.Errorf("unexpected string %q", s)
@@ -371,4 +391,23 @@ func pythonFloat(raw json.RawMessage) (float64, error) {
 	var f float64
 	err := json.Unmarshal(raw, &f)
 	return f, err
+}
+
+// pythonFloatValue is the inverse of pythonFloat.
+func pythonFloatValue(f float64) any {
+	switch {
+	case math.IsInf(f, 1):
+		return posInfinity
+	case math.IsInf(f, -1):
+		return negInfinity
+	case math.IsNaN(f):
+		return notANumber
+	}
+	return f
+}
+
+// isNull reports whether raw JSON is absent (empty) or the null literal.
+func isNull(raw []byte) bool {
+	raw = bytes.TrimSpace(raw)
+	return len(raw) == 0 || string(raw) == "null"
 }
