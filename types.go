@@ -7,7 +7,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 // Package keeper is a client of the Spare Cores Keeper API
 // (https://keeper.sparecores.net). It only reads: /servers,
 // /benchmark_configs, /table/region, /table/zone, /table/vendor,
-// /table/server, /table/server_prices and /healthcheck.
+// /table/server, /table/server_prices and /healthcheck, and Keeper's snapshot
+// files (SnapshotManifest, SnapshotFile; see snapshot.go).
 //
 // Responses are decoded by field name and unknown fields are ignored, so
 // additive schema changes of sc-crawler do not break the client. The decoded

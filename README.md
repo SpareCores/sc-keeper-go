@@ -8,12 +8,13 @@ and SCarpenter.
 
 | Package | What it is |
 |---|---|
-| `github.com/SpareCores/sc-keeper-go` (`keeper`) | Keeper client: `/servers`, `/benchmark_configs`, `/table/region`, `/table/zone`, `/table/vendor` (with billing fields), `/table/server`, `/table/server_prices` (API key), `/server_prices` (anonymous, per-zone prices), `/healthcheck`. Retries with backoff, `Retry-After`, region chunking, a per-cycle memoising `Fetcher`. |
-| `.../selection` | Candidates from Keeper rows, selector filters, data-quality policy, ranking (families, band), the Keeper query plan. Pure functions, no Kubernetes client. |
+| `github.com/SpareCores/sc-keeper-go` (`keeper`) | Keeper client: `/servers`, `/benchmark_configs`, `/table/region`, `/table/zone`, `/table/vendor` (with billing fields), `/table/server`, `/table/server_prices` (API key), `/server_prices` (anonymous, per-zone prices), `/healthcheck`, and Keeper's snapshot files (`SnapshotManifest`, `SnapshotFile`; API key). Retries with backoff, `Retry-After`, region chunking, a per-cycle memoising `Fetcher`. |
+| `.../columnar` | Streaming decoder of Keeper's columnar JSON (`DecodeRows[T]`). |
+| `.../selection` | Candidates from Keeper rows or from catalog data (`BuildCatalogCandidates`), selector filters, data-quality policy, ranking (families, band), the Keeper query plan. Pure functions, no Kubernetes client. |
 | `.../selection/api` | The `Selector`, `Ranking`, `Churn` API types with kubebuilder markers and generated DeepCopy, to embed in a CRD. |
 | `.../selection/churn` | Hysteresis for instance types leaving a selection. |
 | `.../keepertest` | A fake Keeper that replays a snapshot of real responses, for offline tests. |
-| `.../snapshot`, `cmd/sc-snapshot` | Fetch such a snapshot from a query list. |
+| `.../snapshot`, `cmd/sc-snapshot` | Record such a snapshot (and Keeper's snapshot files) from a query list. |
 
 The semantics of selectors and rankings are specified in
 [`docs/reference/selectors.md` of sc-karpenter-nodepool](https://github.com/SpareCores/sc-karpenter-nodepool/blob/main/docs/reference/selectors.md).
@@ -77,9 +78,45 @@ in hours; the last `Upper` is `+Inf`, decoded from the string `"Infinity"`).
 Cacheable requests carry the database hash of `/healthcheck` as `data_version`,
 so all requests of a refresh see one version of the data.
 
+## Keeper snapshots
+
+Keeper builds the files of its tables once per database hash and serves them
+at `/snapshot/{hash}` (the manifest), `/snapshot/{hash}/{table}`,
+`/snapshot/{hash}/{table}/{vendor}` and
+`/snapshot/{hash}/benchmark_score/{vendor}/{benchmark_id}`. They are columnar
+JSON, always gzip, immutable per hash, and need an API key at the public
+Keeper (<https://docs.sparecores.com/api/#authentication>). Pin the hash from
+`Health`, not from a response header:
+
+```go
+c := keeper.New("", keeper.WithAPIKey(key))
+h, err := c.Health(ctx)                                    // h.DatabaseHash, h.DatabasePublishedAt, h.SnapshotHashes
+manifest, version, err := c.SnapshotManifest(ctx, h.DatabaseHash)
+file, _ := manifest.Lookup(keeper.VendorTablePath("server_price", "aws")) // Rows, SHA256 of the uncompressed JSON
+body, err := c.SnapshotFile(ctx, h.DatabaseHash, file.Path) // body.Gzip as received (cache it), body.Version
+err = body.Verify(file.SHA256)
+prices, err := keeper.DecodeSnapshotRows[keeper.ServerPrice](body, file.Rows) // streams from the gzip bytes
+```
+
+Rows decode into `Region`, `Zone`, `Vendor`, `TableServer`, `ServerPrice`,
+`StoragePrice`, `IPv4Price` and `BenchmarkScore` by their `json` tags
+(`columnar.DecodeRows`: one pass, memory is the rows plus one element, repeated
+identifiers share one string). A `BenchmarkScore.Config` is the stored config
+text, byte for byte what `/benchmark_configs` returns.
+
+Errors are typed, for `errors.As`: `*UnauthorizedError` (401; never retried, a
+401 costs 11 of Keeper's rate-limit credits; `KeyConfigured` says whether a key
+was sent) and `*ProblemError` (problem+json: `IsSnapshotNotAvailable`, with
+`Current` to re-pin to; `IsSnapshotPreparing`; `IsNotFound`). A 503
+snapshot-preparing is retried after its `Retry-After` for a minute
+(`WithPreparingBudget`); 429 and other 5xx use the usual retry. Every response
+has `SC-Data-Hash` and `SC-Data-Published-At` (`DataVersion`).
+
 ## Selection
 
-See `selection/example_test.go`: `PlanQueries` turns a `selection/api.Spec` into
+`BuildCatalogCandidates` builds the candidates of a selection from catalog
+data (servers, price rows, scores by server id) without asking Keeper, with the
+price rules of `/servers` (`AcceptPrice`). See `selection/example_test.go`: `PlanQueries` turns a `selection/api.Spec` into
 Keeper queries, `BuildCandidates` joins the results, `Evaluate` filters and
 ranks them.
 
@@ -100,7 +137,37 @@ Requests are matched on path, `vendor`, `vendor_regions`,
 HTTP 404 naming the recorded ones. Use `keepertest.NewFromDir(t, dir)` for your
 own snapshot, and `Handler.Mount` to serve another API next to it.
 
+A recording with a `snapshot` block is also served at Keeper's snapshot routes
+(`keepertest.NewCatalog(t)` serves the committed one, under
+`keepertest/testdata/catalog`: the Hetzner Cloud tables, the vendor table and
+the scores of `stress_ng:bestn`), as the gzip bytes Keeper sent and with its
+headers, 406 without `Accept-Encoding: gzip`, and its 404s. Test options:
+`RequireAPIKey(key)` (the 401 bodies of Keeper), `Preparing(hash, n)` (the
+first `n` requests of a hash get 503 `snapshot-preparing`), `AddHash(hash,
+overrides)` (a second data version with some paths replaced and the manifest's
+digests recomputed), `SetCurrent(hash)` and `Expire(hash)`.
+
 ### Making a snapshot
+
+A list may carry a `snapshot` block to record Keeper's snapshot files too
+(`keepertest/testdata/catalog-queries.yaml`; `make snapshot-catalog`):
+
+```yaml
+vendors: [{name: hcloud}]            # the vendors of the per-vendor files
+snapshot:
+  vendors: [region, zone, server, server_price, storage_price, ipv4_price]
+  global: [vendor]
+  benchmarks: ["stress_ng:bestn"]    # one score file per vendor and id
+```
+
+The run pins `database_hash` from `/healthcheck`, records the manifest and the
+listed files as the gzip bytes received (under `snapshot/`, in the `snapshot`
+block of `manifest.json` with Keeper's digests and the headers `SC-Data-*`,
+`Content-Type` and `Cache-Control`), checks every file against the manifest's
+`sha256`, and fails when a response is of another hash. The snapshot routes need
+a key, from `-api-key-file` or `KEEPER_API_KEY`; without one the run fails at
+once, before any request. A recording never has the key or an `Authorization`
+header.
 
 `/server_prices` responses are stored as a flat projection (only the fields of
 `ZonePrice`; the manifest entry says `"projection": "flat"`) to keep the
