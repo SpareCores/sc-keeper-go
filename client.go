@@ -7,6 +7,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 package keeper
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -448,7 +449,7 @@ func (c *Client) do(ctx context.Context, u string, handle func(*http.Response) e
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		body := readErrorBody(resp)
 		now := time.Now()
 		he := c.responseError(u, resp, body, now)
 		if h, ok := errors.AsType[*HTTPError](he); ok && len(h.Body) > 512 {
@@ -463,6 +464,22 @@ func (c *Client) do(ctx context.Context, u string, handle func(*http.Response) e
 		return 0, &transportError{err: err}
 	}
 	return 0, nil
+}
+
+// readErrorBody reads (at most 64 KiB of) the body of an error response,
+// decompressed when it is gzip-encoded; what cannot be decompressed is
+// returned as received.
+func readErrorBody(resp *http.Response) []byte {
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if !strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip") {
+		return raw
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		return raw
+	}
+	plain, _ := io.ReadAll(io.LimitReader(zr, 64<<10))
+	return plain
 }
 
 // permanentError is a handle failure that a retry would not fix.

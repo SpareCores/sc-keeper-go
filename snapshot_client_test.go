@@ -500,3 +500,28 @@ func TestDecodeSnapshotRows(t *testing.T) {
 		t.Error("a truncated gzip body is accepted")
 	}
 }
+
+// Error bodies are read through the gzip encoding too.
+func TestGzippedErrorBodies(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Encoding", "gzip")
+		if r.URL.Path == "/healthcheck" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write(gz(t, `{"detail":"Invalid or expired token"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write(gz(t, `{"type":"/problems/not-found","title":"Unknown snapshot","status":404}`))
+	}))
+	defer srv.Close()
+	c := keeper.New(srv.URL, keeper.WithAPIKey("k"))
+	var ue *keeper.UnauthorizedError
+	if _, err := c.Health(context.Background()); !errors.As(err, &ue) || ue.Detail != "Invalid or expired token" {
+		t.Errorf("401: %v", err)
+	}
+	if _, err := c.SnapshotFile(context.Background(), testHash, "vendor"); !keeper.IsNotFound(err) {
+		t.Errorf("404: %v", err)
+	}
+}
