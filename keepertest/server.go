@@ -84,7 +84,7 @@ type ManifestQuery struct {
 // matchParams are the parameters that select data; everything else is a
 // push-down filter or paging and is ignored.
 var matchParams = []string{
-	"vendor", "vendor_regions", "best_price_allocation", "allocation", "currency", "benchmark_id", "benchmark_config",
+	"vendor", "vendor_regions", "best_price_allocation", "allocation", tableCurrency, "benchmark_id", "benchmark_config",
 }
 
 // SnapshotDir is the absolute path of the snapshot committed with this module
@@ -199,7 +199,7 @@ func routeKey(path string, values url.Values) string {
 	for _, k := range matchParams {
 		// currency is a push-down filter of /servers (price_max) but selects
 		// the data of the price tables.
-		if k == "currency" && !strings.HasPrefix(path, "/table/") && path != "/server_prices" {
+		if k == tableCurrency && !strings.HasPrefix(path, "/table/") && path != "/server_prices" {
 			continue
 		}
 		vs := slices.Clone(values[k])
@@ -232,6 +232,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			m.handler.ServeHTTP(w, r)
 			return
 		}
+	}
+	if h.guardAuth(w, r) {
+		return
 	}
 	if r.URL.Path == "/healthcheck" {
 		h.serveHealth(w)

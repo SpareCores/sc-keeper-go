@@ -132,6 +132,11 @@ func loadSnapshot(dir string, m *Manifest) (*snapshotState, error) {
 		if h.files[f.Path], err = read(f.File); err != nil {
 			return nil, err
 		}
+		if f.Path == tableVendor {
+			if err := s.addVendorIDs(h.files[f.Path]); err != nil {
+				return nil, err
+			}
+		}
 		if vendor := vendorOf(f.Path); vendor != "" {
 			s.vendors[vendor] = true
 		}
@@ -142,6 +147,25 @@ func loadSnapshot(dir string, m *Manifest) (*snapshotState, error) {
 		}
 	}
 	return s, nil
+}
+
+// addVendorIDs takes the vendors of the recorded vendor table: those are the
+// vendors Keeper knows, whether or not their files were recorded.
+func (s *snapshotState) addVendorIDs(gz []byte) error {
+	raw, err := gunzip(gz)
+	if err != nil {
+		return fmt.Errorf("keepertest: vendor table: %w", err)
+	}
+	rows, err := columnar.DecodeRows[struct {
+		VendorID string `json:"vendor_id"`
+	}](bytes.NewReader(raw), -1)
+	if err != nil {
+		return fmt.Errorf("keepertest: vendor table: %w", err)
+	}
+	for _, r := range rows {
+		s.vendors[r.VendorID] = true
+	}
+	return nil
 }
 
 // vendorOf is the vendor of a per-vendor path ("" for a global table).
@@ -233,9 +257,11 @@ func columnNames(gz []byte) ([]string, error) {
 }
 
 // RequireAPIKey makes the snapshot routes need "Authorization: Bearer <key>":
-// a request without one gets Keeper's 401 "Authentication required", one with
-// another key "Invalid or expired token" (both plain application/json).
-// /healthcheck and the other routes stay open, as at Keeper.
+// a snapshot request without the header gets Keeper's 401 "Authentication
+// required". As at Keeper (AuthGuardMiddleware), an Authorization header that
+// is not the Bearer key gets 401 "Invalid or expired token" on every route,
+// /healthcheck included; without the header the other routes stay open. Both
+// 401s are plain application/json.
 func (h *Handler) RequireAPIKey(key string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -398,6 +424,67 @@ func acceptsGzip(header string) bool {
 	return star
 }
 
+// guardAuth answers 401 "Invalid or expired token" to a request whose
+// Authorization header is not the required Bearer key, on any route, and
+// reports whether it did.
+func (h *Handler) guardAuth(w http.ResponseWriter, r *http.Request) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	s := h.snap
+	auth := r.Header.Get("Authorization")
+	if s == nil || !s.needKey || auth == "" {
+		return false
+	}
+	if got, ok := strings.CutPrefix(auth, "Bearer "); ok && got == s.key {
+		return false
+	}
+	s.unauthorized(w, "Invalid or expired token")
+	return true
+}
+
+func (s *snapshotState) unauthorized(w http.ResponseWriter, detail string) {
+	w.Header().Set("Cache-Control", cacheError)
+	if cur := s.hashes[s.current]; cur != nil {
+		w.Header().Set("SC-Data-Hash", s.current)
+		w.Header().Set("SC-Data-Published-At", cur.publishedAt.Format(time.RFC3339))
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("WWW-Authenticate", "Bearer")
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(map[string]string{"detail": detail})
+}
+
+const (
+	tableVendor   = "vendor"
+	tableCurrency = "currency"
+)
+
+// known are the tables of Keeper's snapshot routes.
+var (
+	globalTables = []string{tableVendor, "country", "compliance_framework", "benchmark", tableCurrency}
+	vendorTables = []string{
+		"region", "zone", "server", "server_description", "server_price", "storage", "storage_price",
+		"traffic_price", "ipv4_price", "database", "database_price", "database_storage",
+		"database_storage_price", "vendor_compliance_link",
+	}
+)
+
+// routeKnown says whether a path below the hash is one of Keeper's routes with
+// valid names (vendor and benchmark id): anything else is a plain not-found,
+// whatever the hash and the headers.
+func routeKnown(path string) bool {
+	parts := strings.Split(path, "/")
+	switch {
+	case len(parts) == 1:
+		return slices.Contains(globalTables, parts[0])
+	case len(parts) == 2:
+		return slices.Contains(vendorTables, parts[0]) && namePattern.MatchString(parts[1])
+	case len(parts) == 3:
+		return parts[0] == "benchmark_score" && namePattern.MatchString(parts[1]) && namePattern.MatchString(parts[2])
+	}
+	return false
+}
+
 func (h *Handler) serveSnapshot(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/snapshot/")
 	hash, path, slash := strings.Cut(rest, "/")
@@ -429,24 +516,16 @@ func (h *Handler) serveSnapshot(w http.ResponseWriter, r *http.Request) {
 		problem(http.StatusNotFound, "/problems/not-found", title, nil)
 	}
 
-	// Auth comes before everything else, the gzip check included.
-	if s.needKey {
-		got, hasBearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		detail := ""
-		switch {
-		case r.Header.Get("Authorization") == "":
-			detail = "Authentication required"
-		case !hasBearer || got != s.key:
-			detail = "Invalid or expired token"
-		}
-		if detail != "" {
-			errHeaders()
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]string{"detail": detail})
-			return
-		}
+	// Auth comes before everything else, the gzip check included. A wrong
+	// Authorization header was answered by guardAuth already.
+	if s.needKey && r.Header.Get("Authorization") == "" {
+		s.unauthorized(w, "Authentication required")
+		return
+	}
+	// A path that is none of Keeper's routes is a not-found under any hash.
+	if slash && !routeKnown(path) {
+		notFound("Unknown snapshot")
+		return
 	}
 	if !acceptsGzip(r.Header.Get("Accept-Encoding")) {
 		problem(http.StatusNotAcceptable, "about:blank", "Send Accept-Encoding: gzip", nil)
@@ -461,7 +540,7 @@ func (h *Handler) serveSnapshot(w http.ResponseWriter, r *http.Request) {
 	if n := s.preparing[hash]; n > 0 {
 		s.preparing[hash] = n - 1
 		w.Header().Set("Retry-After", "0")
-		problem(http.StatusServiceUnavailable, ProblemSnapshotPreparing, "Snapshot is being prepared",
+		problem(http.StatusServiceUnavailable, ProblemSnapshotPreparing, "Snapshot being prepared",
 			map[string]any{"requested": hash, "current": s.current})
 		return
 	}
@@ -493,9 +572,6 @@ func (h *Handler) serveSnapshot(w http.ResponseWriter, r *http.Request) {
 // file finds the gzip bytes of a path: a recorded file, or the empty arrays
 // Keeper answers for a benchmark it has no scores of at a vendor it knows.
 func (s *snapshotState) file(data *snapHash, path string) ([]byte, bool) {
-	if !s.valid(path) {
-		return nil, false
-	}
 	if gz, ok := data.files[path]; ok {
 		return gz, true
 	}
@@ -511,19 +587,6 @@ func (s *snapshotState) file(data *snapHash, path string) ([]byte, bool) {
 		return gzipBytes([]byte("{" + strings.Join(cols, ",") + "}")), true
 	}
 	return nil, false
-}
-
-// valid checks the segments of a path as Keeper does: the vendor and the
-// benchmark id match namePattern.
-func (*snapshotState) valid(path string) bool {
-	parts := strings.Split(path, "/")
-	switch {
-	case len(parts) == 1:
-		return namePattern.MatchString(parts[0])
-	case len(parts) == 2 || (len(parts) == 3 && parts[0] == "benchmark_score"):
-		return !slices.ContainsFunc(parts, func(p string) bool { return !namePattern.MatchString(p) })
-	}
-	return false
 }
 
 // missingTitle explains a 404 of a valid path: a path the manifest lists but

@@ -560,3 +560,62 @@ func TestLegacyRecordingHasNoSnapshotRoutes(t *testing.T) {
 		t.Errorf("the /table/region of the legacy recording: %d, %v", len(regions), err)
 	}
 }
+
+// AuthGuardMiddleware: a wrong or non-Bearer Authorization header is a 401 on
+// every route; no header is a 401 on the snapshot routes only.
+func TestRequireAPIKeyGuardsEveryRoute(t *testing.T) {
+	s := keepertest.NewCatalog(t)
+	s.RequireAPIKey("test-key")
+	for _, path := range []string{"/healthcheck", "/benchmark_configs", "/table/region", "/snapshot/" + recordedHash + "/vendor"} {
+		for _, auth := range []string{"Bearer other", "Basic test-key", "test-key"} {
+			resp, body := rawGet(t, s, path, http.Header{"Authorization": {auth}, "Accept-Encoding": {"gzip"}})
+			if resp.StatusCode != http.StatusUnauthorized || strings.TrimSpace(string(body)) != `{"detail":"Invalid or expired token"}` ||
+				resp.Header.Get("WWW-Authenticate") != "Bearer" {
+				t.Errorf("%s with %q: %d %s", path, auth, resp.StatusCode, body)
+			}
+		}
+		resp, _ := rawGet(t, s, path, http.Header{"Authorization": {"Bearer test-key"}, "Accept-Encoding": {"gzip"}})
+		if resp.StatusCode == http.StatusUnauthorized {
+			t.Errorf("%s with the key: 401", path)
+		}
+	}
+	if resp, _ := rawGet(t, s, "/healthcheck", nil); resp.StatusCode != http.StatusOK {
+		t.Errorf("healthcheck without a header: %d", resp.StatusCode)
+	}
+	resp, body := rawGet(t, s, "/snapshot/"+recordedHash+"/vendor", http.Header{"Accept-Encoding": {"gzip"}})
+	if resp.StatusCode != http.StatusUnauthorized || !strings.Contains(string(body), "Authentication required") {
+		t.Errorf("snapshot without a header: %d %s", resp.StatusCode, body)
+	}
+}
+
+// Keeper's order: an unknown route or invalid name is a not-found before the
+// gzip check and under any hash; Preparing only counts real file requests.
+func TestCatalogCheckOrder(t *testing.T) {
+	s := keepertest.NewCatalog(t)
+	unknown := "0000000000000000000000000000000000000000"
+	for _, path := range []string{"/snapshot/" + unknown + "/nosuchtable/hcloud", "/snapshot/" + recordedHash + "/server/bad%20vendor"} {
+		resp, body := bareGet(t, s, path)
+		if resp.StatusCode != http.StatusNotFound || !strings.Contains(string(body), "/problems/not-found") {
+			t.Errorf("%s: %d %s", path, resp.StatusCode, body)
+		}
+	}
+	// A known route under an unknown hash, without gzip: the gzip check first.
+	if resp, _ := bareGet(t, s, "/snapshot/"+unknown+"/vendor"); resp.StatusCode != http.StatusNotAcceptable {
+		t.Errorf("gzip check: %d", resp.StatusCode)
+	}
+	s.Preparing(recordedHash, 1)
+	if resp, _ := rawGet(t, s, "/snapshot/"+recordedHash+"/nosuchtable", http.Header{"Accept-Encoding": {"gzip"}}); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unknown table while preparing: %d", resp.StatusCode)
+	}
+	if resp, _ := rawGet(t, s, "/snapshot/"+recordedHash+"/vendor", http.Header{"Accept-Encoding": {"gzip"}}); resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("the preparing request was used up: %d", resp.StatusCode)
+	}
+}
+
+// The vendors Keeper knows come from the recorded vendor table.
+func TestCatalogUnknownBenchmarkAtAnyKnownVendor(t *testing.T) {
+	c := newClient(keepertest.NewCatalog(t))
+	if _, err := c.SnapshotFile(ctx, recordedHash, keeper.ScorePath("aws", "nosuch:bench")); err != nil {
+		t.Errorf("a known vendor with no recorded files: %v", err)
+	}
+}

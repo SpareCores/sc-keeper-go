@@ -253,13 +253,12 @@ func TestSnapshotNeedsAKey(t *testing.T) {
 func TestSnapshotRejectedKey(t *testing.T) {
 	k := newKeyedServer(t)
 	_, err := fetchCatalog(t, k, "wrong")
-	var ue *keeper.UnauthorizedError
-	if !errors.As(err, &ue) || !ue.KeyConfigured {
+	// Keeper's auth guard answers a wrong key on every route, /healthcheck
+	// included, and a 401 is not retried (it costs 11 credits).
+	if err == nil || !strings.Contains(err.Error(), "HTTP 401") {
 		t.Errorf("err = %v", err)
 	}
-	// /healthcheck is anonymous; the manifest is the one request that 401s,
-	// and it is not retried (a 401 costs 11 credits).
-	if got := k.requests(); len(got) != 2 || got[1] != "/snapshot/"+catalogHash {
+	if got := k.requests(); len(got) != 1 || got[0] != "/healthcheck" {
 		t.Errorf("requests = %v", got)
 	}
 }
