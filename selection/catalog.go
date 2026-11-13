@@ -66,6 +66,33 @@ func CatalogPriceOf(p *keeper.ServerPrice) CatalogPrice {
 	}
 }
 
+// ScoresOf is the score per server_id of one benchmark config, from the rows
+// of a benchmark_score snapshot file, with the rules /servers applies to its
+// selected_benchmark_score (sc_keeper.queries.gen_benchmark_query):
+//   - only rows of the benchmark (benchmarkID) with status active count;
+//   - only resource_type server (a database's score is not a server's);
+//   - the config is matched as text, byte for byte, against configText (the
+//     string /benchmark_configs returns); an empty configText matches every
+//     config, as an absent benchmark_config does;
+//   - a server with several matching rows gets the highest score, and a row
+//     without a score counts for nothing.
+func ScoresOf(rows []keeper.BenchmarkScore, benchmarkID, configText string) map[string]float64 {
+	out := map[string]float64{}
+	for i := range rows {
+		r := &rows[i]
+		if r.Score == nil || r.Status != StatusActive || r.ResourceType != "server" || r.BenchmarkID != benchmarkID {
+			continue
+		}
+		if configText != "" && string(r.Config) != configText {
+			continue
+		}
+		if old, seen := out[r.ResourceID]; !seen || *r.Score > old {
+			out[r.ResourceID] = *r.Score
+		}
+	}
+	return out
+}
+
 // AcceptPrice says whether a price row counts as the price of a server in a
 // selection, and for which allocation.
 //
@@ -119,7 +146,8 @@ type CatalogInput struct {
 	Prices iter.Seq[CatalogPrice]
 	// Regions are the region ids the selection considers (empty: all).
 	Regions []string
-	// Scores are benchmark scores by server_id, per benchmark. Types without
+	// Scores are benchmark scores by server_id, per benchmark; ScoresOf
+	// builds one map from score rows with the rules of /servers. Types without
 	// a score are absent. The key is the server id, not api_reference: the
 	// two differ for GCP and Hetzner, and prices refer to the id.
 	Scores map[keeper.BenchmarkKey]map[string]float64

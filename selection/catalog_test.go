@@ -316,3 +316,31 @@ func TestCatalogPriceOf(t *testing.T) {
 		t.Errorf("Accept = %q, %v", alloc, ok)
 	}
 }
+
+func TestScoresOf(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	row := func(res, typ, status, config string, score *float64) keeper.BenchmarkScore {
+		return keeper.BenchmarkScore{BenchmarkID: "b", ResourceID: res, ResourceType: typ, Status: status, Config: []byte(config), Score: score}
+	}
+	rows := []keeper.BenchmarkScore{
+		row("s1", "server", "active", `{"cores": "single"}`, f(10)),
+		row("s1", "server", "active", `{"cores": "single"}`, f(30)), // max wins
+		row("s1", "server", "active", `{"cores": "single"}`, f(20)),
+		row("s2", "server", "active", `{"cores":"single"}`, f(99)),   // other text
+		row("s3", "server", "inactive", `{"cores": "single"}`, f(5)), // status
+		row("s4", "database", "active", `{"cores": "single"}`, f(5)), // resource type
+		row("s5", "server", "active", `{"cores": "single"}`, nil),    // no score
+		row("s6", "server", "active", `{"cores": "multi"}`, f(7)),
+		{BenchmarkID: "other", ResourceID: "s7", ResourceType: "server", Status: "active", Config: []byte(`{"cores": "single"}`), Score: f(1)},
+	}
+	got := ScoresOf(rows, "b", `{"cores": "single"}`)
+	if len(got) != 1 || got["s1"] != 30 {
+		t.Errorf("single = %v", got)
+	}
+	if all := ScoresOf(rows, "b", ""); len(all) != 3 || all["s1"] != 30 || all["s2"] != 99 || all["s6"] != 7 {
+		t.Errorf("any config = %v", all)
+	}
+	if none := ScoresOf(nil, "b", ""); none == nil || len(none) != 0 {
+		t.Errorf("no rows = %v", none)
+	}
+}
