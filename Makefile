@@ -45,6 +45,12 @@ tidy: ## go mod tidy.
 snapshot: ## Refresh keepertest/testdata/snapshot from the public Keeper API.
 	go run ./cmd/sc-snapshot -queries keepertest/testdata/queries.yaml -out keepertest/testdata/snapshot
 
+# Keeper's snapshot routes need an API key: KEEPER_API_KEY in the environment,
+# or KEEPER_API_KEY_FILE=<file>.
+.PHONY: snapshot-catalog
+snapshot-catalog: ## Refresh keepertest/testdata/catalog from Keeper's snapshot routes (needs an API key).
+	go run ./cmd/sc-snapshot -queries keepertest/testdata/catalog-queries.yaml -out keepertest/testdata/catalog $(if $(KEEPER_API_KEY_FILE),-api-key-file $(KEEPER_API_KEY_FILE))
+
 .PHONY: test-live-keeper
 test-live-keeper: ## Every selector against the live Keeper API, all snapshot vendors: accepted queries, push-down without effect on the selection.
 	go test -count=1 -tags livekeeper -run TestLiveKeeper -timeout 50m ./selection/

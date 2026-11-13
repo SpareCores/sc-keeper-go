@@ -44,10 +44,47 @@ import (
 // a short hash of the config when the id is listed more than once) and
 // {benchmark_config} (the canonical config string of /benchmark_configs).
 type QueryList struct {
-	Vendors       []Vendor    `json:"vendors,omitempty"`
-	Benchmarks    []Benchmark `json:"benchmarks,omitempty"`
-	Queries       []Entry     `json:"queries,omitempty"`
-	VendorQueries []Entry     `json:"vendorQueries,omitempty"`
+	Vendors       []Vendor      `json:"vendors,omitempty"`
+	Benchmarks    []Benchmark   `json:"benchmarks,omitempty"`
+	Queries       []Entry       `json:"queries,omitempty"`
+	VendorQueries []Entry       `json:"vendorQueries,omitempty"`
+	Snapshot      *SnapshotSpec `json:"snapshot,omitempty"`
+}
+
+// SnapshotSpec says which of Keeper's snapshot files (GET /snapshot/{hash}/...)
+// to record, in the query list as
+//
+//	vendors:                     # the vendors of the list; without vendorQueries
+//	  - {name: hcloud}           # a list with a snapshot block needs no region
+//	snapshot:
+//	  vendors: [region, zone, server, server_price, storage_price, ipv4_price]
+//	  global: [vendor]
+//	  benchmarks: ["stress_ng:bestn"]
+//
+// vendors names the per-vendor tables, recorded for each vendor of the list;
+// global the global tables; benchmarks the benchmark ids, one score file per
+// vendor of the list and id. The files are those of the database hash
+// /healthcheck reports when the run starts, and the snapshot routes need an
+// API key (Options.APIKey).
+type SnapshotSpec struct {
+	Vendors    []string `json:"vendors,omitempty"`
+	Global     []string `json:"global,omitempty"`
+	Benchmarks []string `json:"benchmarks,omitempty"`
+}
+
+// vendorTables and globalTables are the tables Keeper's snapshot routes know
+// (src/sc_keeper/snapshots.py, VENDOR_TABLES and GLOBAL_TABLES).
+var (
+	vendorTables = []string{
+		"region", "zone", "server", "server_description", "server_price", "storage", "storage_price",
+		"traffic_price", "ipv4_price", "database", "database_price", "database_storage",
+		"database_storage_price", "vendor_compliance_link",
+	}
+	globalTables = []string{"vendor", "country", "compliance_framework", "benchmark", "currency"}
+)
+
+func (s *SnapshotSpec) empty() bool {
+	return s == nil || len(s.Vendors)+len(s.Global)+len(s.Benchmarks) == 0
 }
 
 // Vendor is one expansion of vendorQueries.
@@ -143,7 +180,7 @@ func (l *QueryList) validate() error {
 		errs = append(errs, errors.New("vendorQueries without vendors"))
 	}
 	for _, v := range l.Vendors {
-		if v.Name == "" || v.Region == "" {
+		if v.Name == "" || (v.Region == "" && (len(l.VendorQueries) > 0 || l.Snapshot == nil)) {
 			errs = append(errs, fmt.Errorf("vendor %q needs a name and a region", v.Name))
 		}
 		if names[v.Name] {
@@ -151,8 +188,30 @@ func (l *QueryList) validate() error {
 		}
 		names[v.Name] = true
 	}
+	errs = append(errs, l.Snapshot.validate(len(l.Vendors) > 0)...)
 	if !slices.ContainsFunc(l.VendorQueries, func(e Entry) bool { return e.Benchmarks }) && len(l.Benchmarks) > 0 {
 		errs = append(errs, errors.New("benchmarks listed but no vendorQueries entry expands them"))
 	}
 	return errors.Join(errs...)
+}
+
+func (s *SnapshotSpec) validate(haveVendors bool) []error {
+	if s == nil {
+		return nil
+	}
+	var errs []error
+	for _, t := range s.Vendors {
+		if !slices.Contains(vendorTables, t) {
+			errs = append(errs, fmt.Errorf("snapshot.vendors: %q is not a per-vendor table (%v)", t, vendorTables))
+		}
+	}
+	for _, t := range s.Global {
+		if !slices.Contains(globalTables, t) {
+			errs = append(errs, fmt.Errorf("snapshot.global: %q is not a global table (%v)", t, globalTables))
+		}
+	}
+	if len(s.Vendors)+len(s.Benchmarks) > 0 && !haveVendors {
+		errs = append(errs, errors.New("snapshot.vendors and snapshot.benchmarks need vendors"))
+	}
+	return errs
 }

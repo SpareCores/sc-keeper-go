@@ -15,3 +15,4 @@ go.work
 
 # Interrupted snapshot fetch (cmd/sc-snapshot writes next to the output)
 *.tmp/
+*.lock

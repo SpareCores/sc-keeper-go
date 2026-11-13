@@ -42,7 +42,8 @@ type Options struct {
 	Resume bool
 	// KeeperURL is the Keeper API (default https://keeper.sparecores.net).
 	KeeperURL string
-	// APIKey is sent as a bearer token; /table/server_prices needs one.
+	// APIKey is sent as a bearer token. /table/server_prices and the snapshot
+	// routes need one; it is never written to the output.
 	APIKey string
 	// HTTPClient replaces the default (5 minute timeout).
 	HTTPClient *http.Client
@@ -64,6 +65,9 @@ type Manifest struct {
 	// Vendors are the vendor expansions of the query list.
 	Vendors map[string]ManifestVendor `json:"vendors"`
 	Queries []ManifestQuery           `json:"queries"`
+	// Snapshot records Keeper's snapshot files, when the query list has a
+	// snapshot block.
+	Snapshot *ManifestSnapshot `json:"snapshot,omitempty"`
 }
 
 // ManifestKeeper identifies the Keeper database the data was read from.
@@ -145,6 +149,9 @@ func Fetch(ctx context.Context, list *QueryList, opts Options) (*Snapshot, error
 		opts.KeeperURL = "https://keeper.sparecores.net"
 	}
 	opts.KeeperURL = strings.TrimRight(opts.KeeperURL, "/")
+	if err := checkSnapshotKey(list, opts.APIKey); err != nil {
+		return nil, err
+	}
 	if opts.Retries == 0 {
 		opts.Retries = 5
 	}
@@ -168,6 +175,10 @@ func Fetch(ctx context.Context, list *QueryList, opts Options) (*Snapshot, error
 	if err != nil {
 		return nil, err
 	}
+	snapPlan, err := planSnapshot(list, health)
+	if err != nil {
+		return nil, err
+	}
 
 	unlock, err := lockDir(opts.Dir)
 	if err != nil {
@@ -178,24 +189,9 @@ func Fetch(ctx context.Context, list *QueryList, opts Options) (*Snapshot, error
 	if err := recoverReplace(opts.Dir, stage); err != nil {
 		return nil, err
 	}
-	prior := map[string]ManifestQuery{}
-	inDir := map[string]bool{} // prior queries whose file is in opts.Dir, not in the staging directory
-	if opts.Resume {
-		// The existing snapshot first, the interrupted run's files over it.
-		for _, src := range []struct{ dir, file string }{{opts.Dir, "manifest.json"}, {stage, progressFile}} {
-			m, err := loadManifest(filepath.Join(src.dir, src.file))
-			if err != nil || m.Keeper.DatabaseHash != health.DatabaseHash {
-				continue
-			}
-			for _, q := range m.Queries {
-				if verify(filepath.Join(src.dir, filepath.FromSlash(q.File)), q) == nil {
-					prior[q.File] = q
-					inDir[q.File] = src.dir == opts.Dir
-				}
-			}
-		}
-	} else if err := os.RemoveAll(stage); err != nil {
-		return nil, fmt.Errorf("clearing %s: %w", stage, err)
+	prior, inDir, err := loadPrior(opts, stage, health)
+	if err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(stage, 0o750); err != nil {
 		return nil, fmt.Errorf("writing snapshot: %w", err)
@@ -205,6 +201,7 @@ func Fetch(ctx context.Context, list *QueryList, opts Options) (*Snapshot, error
 	m := &snap.Manifest
 	m.KeeperURL = opts.KeeperURL
 	m.Vendors = map[string]ManifestVendor{}
+	m.Queries = []ManifestQuery{}
 	for _, v := range list.Vendors {
 		m.Vendors[v.Name] = ManifestVendor{Region: v.Region, Spot: v.Spot}
 	}
@@ -238,6 +235,10 @@ func Fetch(ctx context.Context, list *QueryList, opts Options) (*Snapshot, error
 		}
 	}
 
+	if m.Snapshot, err = f.recordSnapshot(ctx, snapPlan, health, stage); err != nil {
+		return nil, err
+	}
+
 	after, err := f.health(ctx)
 	if err != nil {
 		return nil, err
@@ -252,6 +253,33 @@ func Fetch(ctx context.Context, list *QueryList, opts Options) (*Snapshot, error
 	return snap, nil
 }
 
+// loadPrior finds the queries that Resume takes over (all of them are fetched
+// again without it, and the staging directory starts empty). inDir marks the
+// ones whose file is in opts.Dir, not in the staging directory.
+func loadPrior(opts Options, stage string, health health) (prior map[string]ManifestQuery, inDir map[string]bool, err error) {
+	prior, inDir = map[string]ManifestQuery{}, map[string]bool{}
+	if !opts.Resume {
+		if err := os.RemoveAll(stage); err != nil {
+			return nil, nil, fmt.Errorf("clearing %s: %w", stage, err)
+		}
+		return prior, inDir, nil
+	}
+	// The existing snapshot first, the interrupted run's files over it.
+	for _, src := range []struct{ dir, file string }{{opts.Dir, "manifest.json"}, {stage, progressFile}} {
+		m, err := loadManifest(filepath.Join(src.dir, src.file))
+		if err != nil || m.Keeper.DatabaseHash != health.DatabaseHash {
+			continue
+		}
+		for _, q := range m.Queries {
+			if verify(filepath.Join(src.dir, filepath.FromSlash(q.File)), q) == nil {
+				prior[q.File] = q
+				inDir[q.File] = src.dir == opts.Dir
+			}
+		}
+	}
+	return prior, inDir, nil
+}
+
 // finish prunes the staging directory to the planned files (leftovers of
 // killed runs and of queries since removed from the list must not reach the
 // output), writes the manifest and swaps the directory into place: the old
@@ -262,6 +290,12 @@ func finish(stage, dir string, m *Manifest, plan []planned) error {
 	keep := map[string]bool{"manifest.json": true}
 	for _, p := range plan {
 		keep[p.file()] = true
+	}
+	if m.Snapshot != nil {
+		keep[m.Snapshot.Manifest.File] = true
+		for _, f := range m.Snapshot.Files {
+			keep[f.File] = true
+		}
 	}
 	if err := pruneTo(stage, keep); err != nil {
 		return fmt.Errorf("pruning %s: %w", stage, err)
@@ -786,6 +820,8 @@ type health struct {
 	DatabaseHash        string            `json:"database_hash"`
 	DatabaseLastUpdated float64           `json:"database_last_updated"`
 	Packages            map[string]string `json:"packages"`
+	// raw is the response as a generic tree (numbers kept as written).
+	raw map[string]any
 }
 
 func readAll(dst *[]byte) func(io.Reader) error {
@@ -804,6 +840,9 @@ func (f *fetcher) health(ctx context.Context) (health, error) {
 	var h health
 	if err := json.Unmarshal(raw, &h); err != nil {
 		return health{}, fmt.Errorf("/healthcheck: %w", err)
+	}
+	if tree, err := decode(raw); err == nil {
+		h.raw, _ = tree.(map[string]any)
 	}
 	return h, nil
 }

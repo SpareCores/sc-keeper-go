@@ -1,0 +1,12 @@
+# What keepertest/testdata/catalog holds: Keeper's snapshot files (GET
+# /snapshot/{hash}/...) of the Hetzner Cloud tables, the vendor table and one
+# benchmark's scores. The snapshot routes need an API key:
+#
+#   make snapshot-catalog       (KEEPER_API_KEY or KEEPER_API_KEY_FILE)
+vendors:
+  - {name: hcloud}
+
+snapshot:
+  vendors: [region, zone, server, server_price, storage_price, ipv4_price]
+  global: [vendor]
+  benchmarks: ["stress_ng:bestn"]

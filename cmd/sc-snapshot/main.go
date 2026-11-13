@@ -11,8 +11,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
 // The query list (see package snapshot) names the requests; the output
 // directory is replaced as a whole; -resume skips the queries an earlier run
-// already wrote. KEEPER_URL and KEEPER_API_KEY (needed by
-// /table/server_prices) are read from the environment.
+// already wrote. KEEPER_URL is read from the environment. The API key, which
+// /table/server_prices and the snapshot routes (a "snapshot:" block in the
+// query list) need, comes from the file named by -api-key-file or else from
+// KEEPER_API_KEY. It is only sent to Keeper: the output has no request
+// headers.
 package main
 
 import (
@@ -21,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/SpareCores/sc-keeper-go/snapshot"
@@ -36,6 +40,7 @@ func main() {
 func run() error {
 	queries := flag.String("queries", "", "query list file (YAML)")
 	out := flag.String("out", "", "output directory (replaced)")
+	keyFile := flag.String("api-key-file", "", "file with the Keeper API key (default: the KEEPER_API_KEY environment variable)")
 	resume := flag.Bool("resume", false, "skip queries whose output already exists, is complete and has the same Keeper database hash")
 	flag.Parse()
 	if *queries == "" || *out == "" {
@@ -46,6 +51,16 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	key := os.Getenv("KEEPER_API_KEY")
+	if *keyFile != "" {
+		raw, err := os.ReadFile(*keyFile)
+		if err != nil {
+			return fmt.Errorf("reading the API key file: %w", err)
+		}
+		if key = strings.TrimSpace(string(raw)); key == "" {
+			return fmt.Errorf("the API key file %s is empty", *keyFile)
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	snap, err := snapshot.Fetch(ctx, list, snapshot.Options{
@@ -53,7 +68,7 @@ func run() error {
 		Resume:    *resume,
 		Log:       func(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...) },
 		KeeperURL: os.Getenv("KEEPER_URL"),
-		APIKey:    os.Getenv("KEEPER_API_KEY"),
+		APIKey:    key,
 	})
 	if err != nil {
 		return err
