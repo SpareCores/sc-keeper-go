@@ -125,6 +125,18 @@ func deriveAcceleratorType(s *keeper.Server) api.AcceleratorType {
 	return ""
 }
 
+// newCandidate is a candidate of a server row with no prices and scores yet.
+func newCandidate(s *keeper.Server) *Candidate {
+	return &Candidate{
+		Server:          *s,
+		Prices:          map[keeper.Allocation]float64{},
+		Scores:          map[keeper.BenchmarkKey]float64{},
+		KeeperFiltered:  map[keeper.BenchmarkKey]bool{},
+		Architecture:    k8sArchitecture(s.CPUArchitecture),
+		AcceleratorType: deriveAcceleratorType(s),
+	}
+}
+
 // BuildCandidates joins query results on api_reference. When results contain
 // a query without a benchmark (the base query), only its rows are
 // candidates and the other queries contribute scores; otherwise every row of
@@ -133,14 +145,7 @@ func BuildCandidates(results []keeper.QueryResult) []*Candidate {
 	hasBase := slices.ContainsFunc(results, func(r keeper.QueryResult) bool { return r.Query.Benchmark == nil })
 	byName := map[string]*Candidate{}
 	add := func(s *keeper.Server) *Candidate {
-		c := &Candidate{
-			Server:          *s,
-			Prices:          map[keeper.Allocation]float64{},
-			Scores:          map[keeper.BenchmarkKey]float64{},
-			KeeperFiltered:  map[keeper.BenchmarkKey]bool{},
-			Architecture:    k8sArchitecture(s.CPUArchitecture),
-			AcceleratorType: deriveAcceleratorType(s),
-		}
+		c := newCandidate(s)
 		byName[s.APIReference] = c
 		return c
 	}
