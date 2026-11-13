@@ -17,6 +17,19 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 // a message naming the closest recorded queries. /healthcheck is synthesised
 // from the manifest. Other handlers (another API the code under test calls)
 // can be mounted next to it with Handler.Mount.
+//
+// A recording with a "snapshot" block (cmd/sc-snapshot, "snapshot:" in the
+// query list) is also served at Keeper's snapshot routes, /snapshot/{hash}
+// and below, as the gzip bytes Keeper sent: the manifest, the global and
+// per-vendor tables and the score files that were recorded. Like Keeper it
+// answers 406 to a request without "Accept-Encoding: gzip", 404
+// snapshot-not-available for another hash, 404 not-found for a path outside
+// the manifest and 200 with empty arrays for a benchmark id it has no scores
+// of at a recorded vendor; a path that the recorded manifest lists but the
+// recording lacks is a 404 whose title names it. /healthcheck then reports
+// database_hash, database_published_at and snapshot_hashes. RequireAPIKey,
+// Preparing, AddHash, SetCurrent and Expire set up the cases of a client
+// test. The committed recording is CatalogDir (NewCatalog).
 package keepertest
 
 import (
@@ -52,6 +65,8 @@ type Manifest struct {
 		Spot   bool   `json:"spot"`
 	} `json:"vendors"`
 	Queries []ManifestQuery `json:"queries"`
+	// Snapshot is the recording of Keeper's snapshot routes, if any.
+	Snapshot *ManifestSnapshot `json:"snapshot,omitempty"`
 }
 
 // ManifestQuery is one recorded query.
@@ -78,6 +93,14 @@ var matchParams = []string{
 func SnapshotDir() string {
 	_, file, _, _ := runtime.Caller(0)
 	return filepath.Join(filepath.Dir(file), "testdata", "snapshot")
+}
+
+// CatalogDir is the absolute path of the recording of Keeper's snapshot files
+// committed with this module (testdata/catalog): the Hetzner Cloud tables, the
+// vendor table and the scores of one benchmark. It resolves like SnapshotDir.
+func CatalogDir() string {
+	_, file, _, _ := runtime.Caller(0)
+	return filepath.Join(filepath.Dir(file), "testdata", "catalog")
 }
 
 // LoadManifest reads manifest.json of a snapshot directory.
@@ -114,6 +137,7 @@ type Handler struct {
 	manifest *Manifest
 	routes   map[string]ManifestQuery
 	mounts   []mount
+	snap     *snapshotState
 
 	mu       sync.Mutex
 	bodies   map[string][]byte
@@ -139,6 +163,11 @@ func NewHandler(dir string) (*Handler, error) {
 			values.Set(k, fmt.Sprint(v))
 		}
 		h.routes[routeKey(q.Path, values)] = q
+	}
+	if m.Snapshot != nil {
+		if h.snap, err = loadSnapshot(dir, m); err != nil {
+			return nil, err
+		}
 	}
 	return h, nil
 }
@@ -208,6 +237,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveHealth(w)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/snapshot/") {
+		h.serveSnapshot(w, r)
+		return
+	}
 	// Like Keeper (HTTP 422, int_parsing): these parameters are integers.
 	for _, name := range integerParams {
 		if s := r.URL.Query().Get(name); s != "" {
@@ -249,6 +282,14 @@ func (h *Handler) notFound(key string) string {
 }
 
 func (h *Handler) serveHealth(w http.ResponseWriter) {
+	if h.snap != nil {
+		h.mu.Lock()
+		body := h.snap.health(h.manifest, h.manifest.Snapshot)
+		h.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(body)
+		return
+	}
 	updated, err := time.Parse(time.RFC3339, h.manifest.Keeper.DatabaseLastUpdated)
 	if err != nil {
 		http.Error(w, "keepertest: bad database_last_updated in manifest: "+err.Error(), http.StatusInternalServerError)
@@ -305,6 +346,13 @@ type TB interface {
 func New(t TB) *Server {
 	t.Helper()
 	return NewFromDir(t, SnapshotDir())
+}
+
+// NewCatalog starts a replay server of the snapshot routes of the recording
+// committed with this module (CatalogDir); it is closed when the test ends.
+func NewCatalog(t TB) *Server {
+	t.Helper()
+	return NewFromDir(t, CatalogDir())
 }
 
 // NewFromDir starts a replay server of the snapshot in dir; it is closed when

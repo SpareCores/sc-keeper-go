@@ -1,0 +1,146 @@
+{
+  "fetched_at": "2026-11-13T20:39:46+00:00",
+  "keeper": {
+    "database_hash": "40ecd194b481b86a3237f51c9be6f590abcd53df",
+    "database_last_updated": "2026-11-13T20:25:38+00:00",
+    "packages": {
+      "sparecores-crawler": "0.10.4",
+      "sparecores-data": "0.5.1",
+      "sparecores-keeper": "2026.11+g7a8f5c0"
+    }
+  },
+  "keeper_url": "https://keeper.sparecores.net",
+  "queries": [],
+  "snapshot": {
+    "files": [
+      {
+        "file": "snapshot/vendor.json.gz",
+        "headers": {
+          "Cache-Control": "private, max-age=86400, immutable",
+          "Content-Type": "application/json",
+          "Sc-Data-Hash": "40ecd194b481b86a3237f51c9be6f590abcd53df",
+          "Sc-Data-Published-At": "2026-11-13T19:50:14Z"
+        },
+        "path": "vendor",
+        "rows": 8,
+        "sha256": "e4d21f48f5fc85155343604529d07f2874531c3b9af3112ab2c8210e7c222f27"
+      },
+      {
+        "file": "snapshot/region/hcloud.json.gz",
+        "headers": {
+          "Cache-Control": "private, max-age=86400, immutable",
+          "Content-Type": "application/json",
+          "Sc-Data-Hash": "40ecd194b481b86a3237f51c9be6f590abcd53df",
+          "Sc-Data-Published-At": "2026-11-13T19:50:14Z"
+        },
+        "path": "region/hcloud",
+        "rows": 6,
+        "sha256": "28a36dcd94348633dae10a663babfbecb057e72a6a4ab2e8be885b752a77e403"
+      },
+      {
+        "file": "snapshot/zone/hcloud.json.gz",
+        "headers": {
+          "Cache-Control": "private, max-age=86400, immutable",
+          "Content-Type": "application/json",
+          "Sc-Data-Hash": "40ecd194b481b86a3237f51c9be6f590abcd53df",
+          "Sc-Data-Published-At": "2026-11-13T19:50:14Z"
+        },
+        "path": "zone/hcloud",
+        "rows": 6,
+        "sha256": "9a30ffc5a6f253f1953c5fdd0233718cca9b3302795cd4af4254621240b77183"
+      },
+      {
+        "file": "snapshot/server/hcloud.json.gz",
+        "headers": {
+          "Cache-Control": "private, max-age=86400, immutable",
+          "Content-Type": "application/json",
+          "Sc-Data-Hash": "40ecd194b481b86a3237f51c9be6f590abcd53df",
+          "Sc-Data-Published-At": "2026-11-13T19:50:14Z"
+        },
+        "path": "server/hcloud",
+        "rows": 26,
+        "sha256": "60bdf02e627add933204508b24a46f47f3e2fc8e6411156cacda419a68e6a311"
+      },
+      {
+        "file": "snapshot/server_price/hcloud.json.gz",
+        "headers": {
+          "Cache-Control": "private, max-age=86400, immutable",
+          "Content-Type": "application/json",
+          "Sc-Data-Hash": "40ecd194b481b86a3237f51c9be6f590abcd53df",
+          "Sc-Data-Published-At": "2026-11-13T19:50:14Z"
+        },
+        "path": "server_price/hcloud",
+        "rows": 79,
+        "sha256": "49a9b4c7d987b090ffd0e0b2904b2c229288c0568f9267b460ea52c519afc12c"
+      },
+      {
+        "file": "snapshot/storage_price/hcloud.json.gz",
+        "headers": {
+          "Cache-Control": "private, max-age=86400, immutable",
+          "Content-Type": "application/json",
+          "Sc-Data-Hash": "40ecd194b481b86a3237f51c9be6f590abcd53df",
+          "Sc-Data-Published-At": "2026-11-13T19:50:14Z"
+        },
+        "path": "storage_price/hcloud",
+        "rows": 6,
+        "sha256": "333dd16f27a7abbb2b659f5680fb5793a39ff3c5c21e45a7a06961cb802a5b43"
+      },
+      {
+        "file": "snapshot/ipv4_price/hcloud.json.gz",
+        "headers": {
+          "Cache-Control": "private, max-age=86400, immutable",
+          "Content-Type": "application/json",
+          "Sc-Data-Hash": "40ecd194b481b86a3237f51c9be6f590abcd53df",
+          "Sc-Data-Published-At": "2026-11-13T19:50:14Z"
+        },
+        "path": "ipv4_price/hcloud",
+        "rows": 6,
+        "sha256": "73dd7efab0da206368be60020bad5260702d0cb257ae6a3d6bec90df74a94706"
+      },
+      {
+        "file": "snapshot/benchmark_score/hcloud/stress_ng_bestn.json.gz",
+        "headers": {
+          "Cache-Control": "private, max-age=86400, immutable",
+          "Content-Type": "application/json",
+          "Sc-Data-Hash": "40ecd194b481b86a3237f51c9be6f590abcd53df",
+          "Sc-Data-Published-At": "2026-11-13T19:50:14Z"
+        },
+        "path": "benchmark_score/hcloud/stress_ng:bestn",
+        "rows": 26,
+        "sha256": "b2823ff4ee6f4b3c8a7bbd9466b00f5ed03ed4e0d06a503deeecfc641bc34aae"
+      }
+    ],
+    "hash": "40ecd194b481b86a3237f51c9be6f590abcd53df",
+    "healthcheck": {
+      "database_alembic_version": "c7d8e9f0a1b2",
+      "database_hash": "40ecd194b481b86a3237f51c9be6f590abcd53df",
+      "database_last_updated": 1794601538.4932013,
+      "database_published_at": "2026-11-13T19:50:14Z",
+      "inspector_rules": "github@170f03fc5bdf64f07d29737b5eeb85a50831e2ab",
+      "packages": {
+        "sparecores-crawler": "0.10.4",
+        "sparecores-data": "0.5.1",
+        "sparecores-keeper": "2026.11+g7a8f5c0"
+      },
+      "snapshot_hashes": [
+        "40ecd194b481b86a3237f51c9be6f590abcd53df"
+      ]
+    },
+    "manifest": {
+      "file": "snapshot/manifest.json.gz",
+      "headers": {
+        "Cache-Control": "private, max-age=86400, immutable",
+        "Content-Type": "application/json",
+        "Sc-Data-Hash": "40ecd194b481b86a3237f51c9be6f590abcd53df",
+        "Sc-Data-Published-At": "2026-11-13T19:50:14Z"
+      }
+    },
+    "published_at": "2026-11-13T19:50:14Z"
+  },
+  "vendors": {
+    "hcloud": {
+      "region": "",
+      "spot": false
+    }
+  }
+}
