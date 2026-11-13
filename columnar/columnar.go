@@ -96,6 +96,9 @@ func columnsOf(t reflect.Type) map[string]column {
 	return cols
 }
 
+// maxPrealloc bounds the rows allocated before they are read.
+const maxPrealloc = 1 << 20
+
 // DecodeRows reads one columnar object from r into rows of T.
 //
 // Each column is matched to a field of T by the name of its json tag and each
@@ -112,6 +115,11 @@ func columnsOf(t reflect.Type) map[string]column {
 // field at its zero value and a pointer field nil. Strings of the identifier
 // columns (vendor_id, region_id, server_id, unit, currency, status, ...) are
 // shared by the rows that carry the same value.
+//
+// With rows > 0 at least one column of T must be present, so that an empty or
+// foreign object does not pass as rows of zero values. The elements of
+// skipped (unknown) columns are only scanned for their extent (strings and
+// brackets balanced), not validated as JSON.
 func DecodeRows[T any](r io.Reader, rows int) ([]T, error) {
 	t := reflect.TypeFor[T]()
 	if t.Kind() != reflect.Struct {
@@ -119,11 +127,15 @@ func DecodeRows[T any](r io.Reader, rows int) ([]T, error) {
 	}
 	d := &decoder[T]{br: bufio.NewReaderSize(r, 64<<10), cols: columnsOf(t), n: -1}
 	if rows >= 0 {
-		d.out = make([]T, rows)
+		// The count comes from a manifest: do not trust it for the allocation.
+		d.out = make([]T, min(rows, maxPrealloc))
 		d.n = rows
 	}
 	if err := d.object(); err != nil {
 		return nil, err
+	}
+	if rows > 0 && d.known == 0 {
+		return nil, fmt.Errorf("columnar: none of the %d columns of the body is a column of %s", d.columns, t)
 	}
 	if d.out == nil {
 		d.out = []T{}
@@ -140,8 +152,11 @@ type decoder[T any] struct {
 	br   *bufio.Reader
 	cols map[string]column
 	out  []T
-	n    int    // rows of the file: -1 until known
-	buf  []byte // the current element
+	n    int // rows of the file: -1 until known
+	// known and columns count the columns of the body that are fields of T,
+	// and all of them.
+	known, columns int
+	buf            []byte // the current element
 }
 
 func isSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
@@ -197,6 +212,9 @@ func (d *decoder[T]) object() error {
 		case c == ',':
 			if c, err = d.next(); err != nil {
 				return fmt.Errorf("columnar: after column %q: %w", name, err)
+			}
+			if c == '}' {
+				return errors.New("columnar: trailing comma after the last column")
 			}
 		case c != '}':
 			return fmt.Errorf("columnar: after column %q: found %q, want ',' or '}'", name, c)
@@ -314,6 +332,10 @@ func (d *decoder[T]) column(name string) error {
 		return fmt.Errorf("columnar: column %q is not an array", name)
 	}
 	col, known := d.cols[name]
+	d.columns++
+	if known {
+		d.known++
+	}
 	var interned map[string]string
 	if known && col.kind == kindIntern {
 		interned = map[string]string{}
@@ -344,6 +366,9 @@ func (d *decoder[T]) column(name string) error {
 		case c == ',':
 			if c, err = d.next(); err != nil {
 				return fmt.Errorf("columnar: column %q row %d: %w", name, i, err)
+			}
+			if c == ']' {
+				return fmt.Errorf("columnar: column %q: trailing comma", name)
 			}
 		case c != ']':
 			return fmt.Errorf("columnar: column %q row %d: found %q, want ',' or ']'", name, i, c)

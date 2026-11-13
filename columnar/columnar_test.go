@@ -148,6 +148,11 @@ func TestDecodeRowsErrors(t *testing.T) {
 		{"truncated after a column", `{"count":[1,2]`, -1, "unexpected EOF"},
 		{"truncated unknown", `{"unknown":[1,`, -1, "unexpected EOF"},
 		{"empty", ``, -1, "unexpected EOF"},
+		{"trailing comma in a column", `{"count":[1,2,]}`, -1, "trailing comma"},
+		{"trailing comma in an unknown column", `{"unknown":[1,2,]}`, -1, "trailing comma"},
+		{"trailing comma in the object", `{"count":[1],}`, -1, "trailing comma"},
+		{"empty object for rows", `{}`, 3, "none of the 0 columns"},
+		{"only foreign columns for rows", `{"unknown":[1,2,3]}`, 3, "none of the 1 columns"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -246,5 +251,29 @@ func TestDecodeRowsStreams(t *testing.T) {
 	rowBytes := uint64(n) * uint64(unsafe.Sizeof(row{}))
 	if used := after.TotalAlloc - before.TotalAlloc; used > rowBytes+8<<20 {
 		t.Errorf("allocated %d MB for %d MB of rows and a %d MB body", used>>20, rowBytes>>20, sent>>20)
+	}
+}
+
+// A manifest's row count is not trusted for the allocation.
+func TestDecodeRowsHugeCount(t *testing.T) {
+	_, err := columnar.DecodeRows[row](strings.NewReader(`{"count":[1,2]}`), 1<<62)
+	if err == nil || !strings.Contains(err.Error(), "has 2 rows, want") {
+		t.Errorf("err = %v", err)
+	}
+	rows, err := columnar.DecodeRows[row](strings.NewReader(`{"count":[1,2]}`), 2)
+	if err != nil || len(rows) != 2 {
+		t.Errorf("%v, %v", rows, err)
+	}
+}
+
+func TestDecodeRowsBeyondPrealloc(t *testing.T) {
+	const n = 1<<20 + 5
+	body := `{"count":[` + strings.Repeat("1,", n-1) + `1]}`
+	rows, err := columnar.DecodeRows[row](strings.NewReader(body), n)
+	if err != nil || len(rows) != n || rows[n-1].Count != 1 {
+		t.Fatalf("%d rows, %v", len(rows), err)
+	}
+	if _, err := columnar.DecodeRows[row](strings.NewReader(body), n+1); err == nil {
+		t.Error("a count one too high is accepted")
 	}
 }
