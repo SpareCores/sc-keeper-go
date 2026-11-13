@@ -146,10 +146,18 @@ type Zone struct {
 }
 
 // Health is the subset of GET /healthcheck the controller uses: the hash and
-// update time of the Spare Cores database Keeper serves.
+// update time of the Spare Cores database Keeper serves, and its snapshots.
 type Health struct {
+	// DatabaseHash is the data version to pin; "" when Keeper serves no
+	// published database (it reports null).
 	DatabaseHash        string
 	DatabaseLastUpdated time.Time
+	// DatabasePublishedAt is when the database of DatabaseHash was
+	// published; zero when Keeper does not say.
+	DatabasePublishedAt time.Time
+	// SnapshotHashes are the hashes the replica has snapshots of locally,
+	// newest first.
+	SnapshotHashes []string
 }
 
 // TableServer is one row of GET /table/server: the Server table as is, one row
@@ -229,6 +237,10 @@ type ServerPrice struct {
 	// Price is per Unit, in Currency.
 	Price        float64 `json:"price"`
 	PriceUpfront float64 `json:"price_upfront"`
+	// PriceMonthly is Keeper's own column of the snapshot files (the
+	// monthly price of an on-demand row, nil for spot); /table/server_prices
+	// does not have it.
+	PriceMonthly *float64 `json:"price_monthly"`
 	// PriceTiered is the tiered pricing (hours), empty for flat prices.
 	PriceTiered []PriceTier `json:"price_tiered"`
 	Currency    string      `json:"currency"`

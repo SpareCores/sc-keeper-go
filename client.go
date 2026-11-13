@@ -50,6 +50,7 @@ type Client struct {
 	regionsPerRequest       int
 	pricesRegionsPerRequest int
 	maxRetries              int
+	preparingBudget         time.Duration
 	baseDelay               time.Duration
 	maxDelay                time.Duration
 	sleep                   func(ctx context.Context, d time.Duration) error
@@ -98,6 +99,23 @@ func WithRetries(n int, base, maxDelay time.Duration) Option {
 	}
 }
 
+// DefaultPreparingBudget is how long a snapshot request waits for a replica
+// that is still preparing the snapshot (WithPreparingBudget).
+const DefaultPreparingBudget = time.Minute
+
+// defaultPreparingDelay is the wait between two attempts when Keeper's 503
+// snapshot-preparing carries no Retry-After.
+const defaultPreparingDelay = 5 * time.Second
+
+// WithPreparingBudget sets the total time a request waits while Keeper
+// answers 503 snapshot-preparing (default DefaultPreparingBudget), retrying
+// the same request after each Retry-After (5 seconds without one). The
+// ProblemError is returned when the budget is used up. These waits are not
+// counted as retries (WithRetries).
+func WithPreparingBudget(d time.Duration) Option {
+	return func(c *Client) { c.preparingBudget = d }
+}
+
 // WithSleep replaces how the client waits between retries (tests use it to
 // observe backoff without waiting).
 func WithSleep(sleep func(ctx context.Context, d time.Duration) error) Option {
@@ -116,6 +134,7 @@ func New(baseURL string, opts ...Option) *Client {
 		regionsPerRequest:       DefaultRegionsPerRequest,
 		pricesRegionsPerRequest: DefaultServerPricesRegionsPerRequest,
 		maxRetries:              4,
+		preparingBudget:         DefaultPreparingBudget,
 		baseDelay:               2 * time.Second,
 		maxDelay:                2 * time.Minute,
 		sleep:                   sleepCtx,
@@ -298,20 +317,29 @@ func decodeZonePrices(r io.Reader) ([]ZonePrice, error) {
 	return rows, nil
 }
 
-// Health returns the hash and update time of the database Keeper serves.
+// Health returns the hash and update time of the database Keeper serves and
+// the snapshot hashes the replica has. A Keeper without a published database
+// has no hash: DatabaseHash is then "".
 func (c *Client) Health(ctx context.Context) (Health, error) {
 	var raw struct {
-		DatabaseHash        string  `json:"database_hash"`
-		DatabaseLastUpdated float64 `json:"database_last_updated"`
+		DatabaseHash        *string   `json:"database_hash"`
+		DatabaseLastUpdated float64   `json:"database_last_updated"`
+		DatabasePublishedAt time.Time `json:"database_published_at"`
+		SnapshotHashes      []string  `json:"snapshot_hashes"`
 	}
 	if err := c.get(ctx, "/healthcheck", nil, &raw); err != nil {
 		return Health{}, err
 	}
 	sec, frac := math.Modf(raw.DatabaseLastUpdated)
-	return Health{
-		DatabaseHash:        raw.DatabaseHash,
+	h := Health{
 		DatabaseLastUpdated: time.Unix(int64(sec), int64(frac*1e9)).UTC(),
-	}, nil
+		DatabasePublishedAt: raw.DatabasePublishedAt.UTC(),
+		SnapshotHashes:      raw.SnapshotHashes,
+	}
+	if raw.DatabaseHash != nil {
+		h.DatabaseHash = *raw.DatabaseHash
+	}
+	return h, nil
 }
 
 // versionParams is the data_version parameter of a cacheable table request
@@ -328,20 +356,62 @@ func (c *Client) get(ctx context.Context, path string, params url.Values, out an
 	return c.getWith(ctx, path, params, func(r io.Reader) error { return json.NewDecoder(r).Decode(out) })
 }
 
-// getWith performs a GET with retries and hands the body to decode. decode
-// must start from scratch on every call: a truncated body is retried.
+// getWith performs a GET with retries and hands the body (decompressed) to
+// decode. decode must start from scratch on every call: a truncated body is
+// retried.
 func (c *Client) getWith(ctx context.Context, path string, params url.Values, decode func(io.Reader) error) error {
 	u := c.baseURL + path
 	if len(params) > 0 {
 		u += "?" + params.Encode()
 	}
+	return c.getResponse(ctx, u, func(resp *http.Response) error {
+		body := io.Reader(resp.Body)
+		if strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip") {
+			zr, err := gzip.NewReader(resp.Body)
+			if err != nil {
+				return fmt.Errorf("decoding %s: %w", u, err)
+			}
+			defer func() { _ = zr.Close() }()
+			body = zr
+		}
+		if err := decode(body); err != nil {
+			return fmt.Errorf("decoding %s: %w", u, err)
+		}
+		return nil
+	})
+}
+
+// getResponse performs a GET with retries and hands a 2xx response to handle.
+// A failing handle is a broken transfer and is retried like a failed request
+// (it is called again from the start). A 429 or 5xx answer is retried with
+// backoff, except Keeper's 503 snapshot-preparing, which is retried after its
+// Retry-After for up to the preparing budget; a 401 is never retried.
+func (c *Client) getResponse(ctx context.Context, u string, handle func(*http.Response) error) error {
 	var lastErr error
-	for attempt := 0; ; attempt++ {
-		retryAfter, err := c.do(ctx, u, decode)
+	var preparing time.Duration // waited so far for a snapshot in preparation
+	waits := 0
+	for attempt := 0; ; {
+		retryAfter, err := c.do(ctx, u, handle)
 		if err == nil {
 			return nil
 		}
 		lastErr = err
+		if pe, ok := errors.AsType[*ProblemError](err); ok && pe.is(ProblemSnapshotPreparing) {
+			delay := defaultPreparingDelay
+			if pe.hasRetryAfter {
+				delay = pe.RetryAfter
+			}
+			// waits only matters for a Retry-After of 0, which spends no budget.
+			if preparing+delay > c.preparingBudget || waits >= 1000 {
+				return lastErr
+			}
+			waits++
+			if err := c.sleep(ctx, delay); err != nil {
+				return fmt.Errorf("%w (last error: %w)", err, lastErr)
+			}
+			preparing += max(delay, time.Millisecond)
+			continue
+		}
 		if !retryable(err) || attempt >= c.maxRetries {
 			return lastErr
 		}
@@ -352,19 +422,20 @@ func (c *Client) getWith(ctx context.Context, path string, params url.Values, de
 		if err := c.sleep(ctx, delay); err != nil {
 			return fmt.Errorf("%w (last error: %w)", err, lastErr)
 		}
+		attempt++
 	}
 }
 
 // do performs one request. It returns the Retry-After delay of a 429/503
 // response, if any.
-func (c *Client) do(ctx context.Context, u string, decode func(io.Reader) error) (time.Duration, error) {
+func (c *Client) do(ctx context.Context, u string, handle func(*http.Response) error) (time.Duration, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return 0, fmt.Errorf("building request %s: %w", u, err)
 	}
 	req.Header.Set("Accept", "application/json")
 	// Setting the header ourselves turns off net/http's transparent gzip, so
-	// the body is decoded below. Keeper's CDN does not compress today.
+	// handle sees the body as sent. Keeper's snapshot routes answer gzip only.
 	req.Header.Set("Accept-Encoding", "gzip")
 	req.Header.Set("User-Agent", c.userAgent)
 	if c.apiKey != "" {
@@ -377,27 +448,28 @@ func (c *Client) do(ctx context.Context, u string, decode func(io.Reader) error)
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()), &HTTPError{
-			URL:        u,
-			StatusCode: resp.StatusCode,
-			Body:       strings.TrimSpace(string(body)),
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		now := time.Now()
+		he := c.responseError(u, resp, body, now)
+		if h, ok := errors.AsType[*HTTPError](he); ok && len(h.Body) > 512 {
+			h.Body = h.Body[:512]
 		}
+		return parseRetryAfter(resp.Header.Get("Retry-After"), now), he
 	}
-	body := io.Reader(resp.Body)
-	if strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip") {
-		zr, err := gzip.NewReader(resp.Body)
-		if err != nil {
-			return 0, &transportError{err: fmt.Errorf("decoding %s: %w", u, err)}
+	if err := handle(resp); err != nil {
+		if _, ok := errors.AsType[*permanentError](err); ok {
+			return 0, err
 		}
-		defer func() { _ = zr.Close() }()
-		body = zr
-	}
-	if err := decode(body); err != nil {
-		return 0, &transportError{err: fmt.Errorf("decoding %s: %w", u, err)}
+		return 0, &transportError{err: err}
 	}
 	return 0, nil
 }
+
+// permanentError is a handle failure that a retry would not fix.
+type permanentError struct{ err error }
+
+func (e *permanentError) Error() string { return e.err.Error() }
+func (e *permanentError) Unwrap() error { return e.err }
 
 // transportError marks network and truncated-body errors, which are retried.
 type transportError struct{ err error }
