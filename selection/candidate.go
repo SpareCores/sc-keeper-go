@@ -48,8 +48,16 @@ type Candidate struct {
 // Name is the instance type (api_reference).
 func (c *Candidate) Name() string { return c.Server.APIReference }
 
-// Family is the Spare Cores family.
-func (c *Candidate) Family() string { return c.Server.Family }
+// Family is the instance family used for family constraints and ranking: the
+// Spare Cores series (the hardware line, e.g. m7i) when set, otherwise the
+// family (the broad class, e.g. General Purpose; vendors without series).
+// Before sc-crawler 0.10.4 the family column held the hardware line.
+func (c *Candidate) Family() string {
+	if s := c.Server.Series; s != nil && *s != "" {
+		return *s
+	}
+	return c.Server.Family
+}
 
 // VCPUs is the number of vCPUs.
 func (c *Candidate) VCPUs() int { return c.Server.VCPUs }
