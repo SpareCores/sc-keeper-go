@@ -151,7 +151,8 @@ type Selector struct {
 	// +optional
 	InstanceTypes *GlobFilter `json:"instanceTypes,omitempty"`
 
-	// families include/exclude globs on the Spare Cores family string.
+	// families include/exclude globs on the instance family: the Spare Cores series
+	// (e.g. m7i) when set, otherwise the family (e.g. General Purpose).
 	// +optional
 	Families *GlobFilter `json:"families,omitempty"`
 
