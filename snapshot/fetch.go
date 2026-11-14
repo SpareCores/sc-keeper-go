@@ -193,7 +193,7 @@ func Fetch(ctx context.Context, list *QueryList, opts Options) (*Snapshot, error
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(stage, 0o750); err != nil {
+	if err := os.MkdirAll(stage, 0o755); err != nil {
 		return nil, fmt.Errorf("writing snapshot: %w", err)
 	}
 
@@ -304,7 +304,7 @@ func finish(stage, dir string, m *Manifest, plan []planned) error {
 	if err != nil {
 		return fmt.Errorf("encoding manifest: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(stage, "manifest.json"), append(manifest, '\n'), 0o600); err != nil {
+	if err := writeRecording(filepath.Join(stage, "manifest.json"), append(manifest, '\n')); err != nil {
 		return fmt.Errorf("writing manifest: %w", err)
 	}
 	old := dir + ".old"
@@ -380,7 +380,7 @@ func writeProgress(stage string, m *Manifest) error {
 		return err
 	}
 	tmp := filepath.Join(stage, progressFile+".part")
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+	if err := writeRecording(tmp, raw); err != nil {
 		return fmt.Errorf("writing progress: %w", err)
 	}
 	return os.Rename(tmp, filepath.Join(stage, progressFile))
@@ -440,7 +440,7 @@ func verify(path string, q ManifestQuery) error {
 }
 
 func copyFile(from, to string) error {
-	if err := os.MkdirAll(filepath.Dir(to), 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
 		return fmt.Errorf("writing snapshot: %w", err)
 	}
 	in, err := os.Open(from) //nolint:gosec // the output directory chosen by the user
@@ -448,7 +448,7 @@ func copyFile(from, to string) error {
 		return err
 	}
 	defer func() { _ = in.Close() }()
-	out, err := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:gosec // as above
+	out, err := openRecording(to)
 	if err != nil {
 		return err
 	}
@@ -711,7 +711,7 @@ func store(r io.Reader, p planned, dest string) (ManifestQuery, error) {
 		return fail(errors.New("trailing data after the JSON value"))
 	}
 
-	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:gosec // the output directory chosen by the user
+	out, err := openRecording(dest)
 	if err != nil {
 		return fail(err)
 	}
@@ -791,7 +791,7 @@ func projectRow(row map[string]json.RawMessage, fields []string) (map[string]any
 // fetchQuery streams one query to dest (through a .part file renamed when
 // complete, so a file that exists is a whole one).
 func (f *fetcher) fetchQuery(ctx context.Context, p planned, dest string) (ManifestQuery, error) {
-	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return ManifestQuery{}, fmt.Errorf("writing snapshot: %w", err)
 	}
 	part := dest + ".part"

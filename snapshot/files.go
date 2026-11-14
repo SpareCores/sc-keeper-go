@@ -227,11 +227,38 @@ func (f *fetcher) recordSnapshot(ctx context.Context, plan []snapshotPath, pin h
 
 func writeFile(dir, rel string, data []byte) error {
 	dest := filepath.Join(dir, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return fmt.Errorf("writing snapshot: %w", err)
 	}
-	if err := os.WriteFile(dest, data, 0o600); err != nil {
+	if err := writeRecording(dest, data); err != nil {
 		return fmt.Errorf("writing snapshot: %w", err)
 	}
 	return nil
+}
+
+// recordingMode is the mode of recorded files: world-readable, so the
+// recordings can be read by other users (for example inside containers).
+const recordingMode os.FileMode = 0o644
+
+// openRecording creates or truncates path for writing and sets its mode to
+// recordingMode regardless of the umask.
+func openRecording(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, recordingMode) //nolint:gosec // recorded data, meant to be world-readable
+	if err != nil {
+		return nil, err
+	}
+	if err := f.Chmod(recordingMode); err != nil { //nolint:gosec // as above
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+// writeRecording writes data to path with mode recordingMode regardless of
+// the umask.
+func writeRecording(path string, data []byte) error {
+	if err := os.WriteFile(path, data, recordingMode); err != nil { //nolint:gosec // recorded data, meant to be world-readable
+		return err
+	}
+	return os.Chmod(path, recordingMode) //nolint:gosec // as above
 }
